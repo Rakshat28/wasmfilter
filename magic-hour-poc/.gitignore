@@ -169,5 +169,7 @@ $RECYCLE.BIN/
 build/*.wasm
 build/*.wasm.map
 build/*.wat
+public/scorer.wasm
 
-test-assets/
+# Ignore large test videos
+public/test-assets/

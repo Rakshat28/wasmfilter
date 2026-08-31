@@ -86,3 +86,13 @@ This WASM module is **Stateful**. It intentionally stores the grayscale data of 
 Because of this stateful internal memory, **you absolutely cannot process frames out of chronological order** within the same WASM instance. 
 - **What happens if you break this rule?** If a Worker processes Frame 10, and then is immediately assigned to process Frame 500, the `motionDelta` for Frame 500 will be compared against Frame 10. The system will falsely report an explosive, massive spike in motion (a scene change), ruining the data.
 - **The Worker Assignment Rule**: When the Web Worker pool is built in Phase 2, each Worker (and its embedded WASM instance) must be assigned a single, contiguous "window" of video frames. It must process that entire window sequentially (e.g., Frame 1, Frame 2, Frame 3). If a Worker jumps to a new segment, the very first frame of that new segment will unavoidably generate a corrupted `motionDelta` (which must be ignored or flagged by the Orchestrator).
+
+---
+
+## 6. Downscaling and the "Zero-Copy" Tradeoff (Phase 2 Addendum)
+
+During the decoding phase, the raw `VideoFrame` must be downscaled to exactly 160x90 to match our fixed 57,600-byte input buffer. This downscaling is achieved by drawing the `VideoFrame` onto an `OffscreenCanvas` and reading the pixels back via `getImageData`.
+
+**Crucial Architecture Note:**
+This specific step is **not** zero-copy. Reading from a canvas (`getImageData`) forces a GPU-to-CPU memory copy, and often involves a format conversion (e.g., YUV to RGBA). 
+This is a deliberate, documented tradeoff for this Proof-of-Concept. It allows us to seamlessly downscale video of *any* arbitrary resolution into our strict 160x90 WASM contract without writing a complex, manual YUV resampler in WebAssembly. Because of this readback penalty, this pipeline should not be described as "fully zero-copy".

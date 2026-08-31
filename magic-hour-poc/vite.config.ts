@@ -1,1 +1,1 @@
-export default { root: '.', publicDir: 'test-assets' };
+export default { root: '.', publicDir: 'public' };

@@ -1,10 +1,29 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<script type="module">
-import { add } from "./build/release.js";
-document.body.innerText = add(1, 2);
-</script>
+  <meta charset="UTF-8">
+  <title>Magic Hour POC Test</title>
 </head>
-<body></body>
+<body>
+  <div id="app">Testing WASM Loader... check console.</div>
+  <script type="module">
+    import { loadScorer } from './src/loader.ts';
+    
+    async function testLoader() {
+      try {
+        const scorer = await loadScorer();
+        console.log('Loader successful!', scorer);
+        if (typeof scorer.scoreFrame === 'function') {
+          console.log('scoreFrame is callable!');
+          document.getElementById('app').innerText = 'WASM loaded successfully!';
+        }
+      } catch (err) {
+        console.error('Loader failed:', err);
+        document.getElementById('app').innerText = 'WASM load failed!';
+      }
+    }
+    
+    testLoader();
+  </script>
+</body>
 </html>

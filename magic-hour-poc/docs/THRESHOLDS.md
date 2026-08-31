@@ -107,4 +107,112 @@ If the pipeline detects more than one valid face blob surviving the size filters
 Magic Hour aims to extract a *single* identity. A scene with multiple valid faces introduces heavy uncertainty regarding which subject is the primary target. Capping the confidence ensures that downstream systems treat the frame with skepticism, preventing it from being accidentally selected as an ideal "anchor" frame for processing.
 
 ---
-*(Note: Additional TS-layer thresholds, such as maximum Sharpness, Motion Delta caps, and file size ceilings, will be appended to this document during Phase 2 as they are implemented in the TypeScript wrapper layer.)*
+## 6. TypeScript Orchestration Thresholds (Phase 2)
+
+The following constants govern the behavior of the Web Worker pool and the final pass/fail logic of the ingest pipeline. Like the WASM thresholds, **these are placeholders requiring empirical tuning**.
+
+### `BLUR_SHARPNESS_MAX = 15.0`
+
+**What is it?**
+This acts as the absolute floor for our focus-checking logic. If the `sharpness` score (calculated by the WASM Laplacian Variance) falls *below* this number, the TypeScript orchestration layer officially flags the frame as `BLUR`.
+
+**Why 15.0?**
+A perfectly flat, solid color (like our synthetic gray test frame) scores exactly `0`. However, real video is never perfectly solid; digital camera sensors naturally introduce tiny amounts of "grain" or "noise" that the Laplacian filter will pick up. A score of `15.0` is an initial conservative guess that sits just above standard camera noise but below the variance of an actual, in-focus physical edge (like an eye or a neckline).
+
+**How changing this value affects the system:**
+- **If you increase it (e.g., to `50.0`):** The system becomes incredibly strict about focus. Even slightly soft video (like a smartphone video taken at night) will be aggressively rejected as blurry. 
+- **If you decrease it (e.g., to `2.0`):** The system becomes too forgiving. Highly compressed, muddy, out-of-focus video will bypass the `BLUR` flag, leading to terrible, smeared generative video outputs.
+
+---
+
+### `LOW_CONFIDENCE_MAX = 0.4`
+
+**What is it?**
+This is the cut-off point for framing quality. If WASM returns a `faceConfidence` score that is *lower* than this value, TypeScript permanently flags the frame with the `LOW_CONFIDENCE` penalty.
+
+**Why 0.4?**
+A perfect frame scores a `1.0`. A score of `0.4` means the subject's face is drastically far away from the ideal 16.5% screen size (either they are a tiny dot in the distance, or their face is consuming almost the entire frame). Crucially, remember that WASM mathematically caps *multiple* faces at a maximum confidence of `0.5`. By setting this threshold at `0.4`, we are demanding that the main face be somewhat reasonably framed, but we are *not* automatically failing multi-face frames (yet), giving the user a chance to trim the video.
+
+**How changing this value affects the system:**
+- **If you increase it (e.g., to `0.8`):** You demand cinematographic perfection. Any video that isn't framed exactly at the 16.5% sweet spot will fail, frustrating users who just want to use a casual selfie video. Furthermore, because multi-face frames are capped at `0.5`, an `0.8` threshold means *every single multi-face frame instantly fails*.
+- **If you decrease it (e.g., to `0.1`):** The system will gladly accept wildly distorted macro-shots or shots where the person is barely visible on the horizon.
+
+---
+
+### `HIGH_MOTION_MIN = 40.0`
+
+**What is it?**
+This threshold defines the boundary for acceptable camera movement. If the `motionDelta` (the average pixel-brightness shift between the current frame and the previous one) exceeds this number, the frame is flagged as `HIGH_MOTION`.
+
+**Why 40.0?**
+The `motionDelta` score operates on a scale of `0` (perfectly still) to `255` (every pixel went from black to white). A score of `40.0` means the average pixel shifted its brightness by roughly 15%. In a downscaled 160x90 video, this level of shift usually only occurs during a violent, shaky camera movement (whip-pan) or a hard scene cut (jumping from one clip to another). Neither of these are acceptable for our generative pipeline, which needs a clean, stable "anchor" frame.
+
+**How changing this value affects the system:**
+- **If you increase it (e.g., to `100.0`):** You allow wildly shaky, unstable footage to pass through the ingest gate, which will cause the downstream generative model to warp and break as it tries to track the erratic movement.
+- **If you decrease it (e.g., to `5.0`):** The system becomes hyper-sensitive. A user simply breathing or slowly turning their head might trigger the `HIGH_MOTION` flag, making the app unusable for normal portrait videos.
+
+---
+
+### `BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.2`
+
+**What is it?**
+This is the final, overarching Pass/Fail grade for the entire video clip. It represents a ratio (20%). Once the worker pool finishes analyzing the video chunk, it counts up all the frames. If more than 20% of those frames have flags (Blur, No Face, High Motion, etc.), the entire clip fails the ingest gate.
+
+**Why 20%?**
+If a 5-second clip has 1 bad, blurry frame in the middle, it's usually fine; the generative model can interpolate over it. But if 1 out of every 5 frames (20%) is blurry, poorly framed, or wildly shaking, the source material is fundamentally flawed and will guarantee a terrible final output. 
+
+**How changing this value affects the system:**
+- **If you increase it (e.g., to `0.5` / 50%):** You allow garbage-tier video to be processed, meaning the user will waste expensive cloud GPU credits generating a terrible Magic Hour video.
+- **If you decrease it (e.g., to `0.01` / 1%):** The app becomes infuriating to use. A single dropped frame or momentary blur from a smartphone camera autofocusing will reject the user's entire upload.
+
+---
+
+### `SAMPLE_FPS = 2`
+
+**What is it?**
+This controls how many frames per second the Web Worker pool will extract from the video file to send to WASM.
+
+**Why 2 FPS?**
+A standard iPhone video is 30 or 60 frames per second. We do *not* need to run computer vision math on 60 frames to know if a one-second clip is in focus. Extracting and analyzing every single frame would freeze the browser. Sampling at 2 FPS (one frame every 500ms) gives us enough data points to easily catch momentary blur or motion spikes while using a tiny fraction of the user's CPU.
+
+**How changing this value affects the system:**
+- **If you increase it (e.g., to `15`):** The ingest pipeline will run incredibly slowly and drain laptop/mobile batteries, with almost zero improvement in the final Pass/Fail accuracy.
+- **If you decrease it (e.g., to `0.2` / one frame every 5 seconds):** You create massive blind spots. A video could have a perfectly clear frame at Second 0, and a perfectly clear frame at Second 5, but be completely blurry in the middle, and the system would never know.
+
+---
+
+### `DEBOUNCE_MS = 300`
+
+**What is it?**
+A standard UI optimization (debounce timeout). It dictates how long the TypeScript layer must wait after the user *stops* adjusting the UI before it kicks off the heavy video decoding process.
+
+**Why 300ms?**
+When a user drags a video trimmer slider, they might pass over 100 different timestamps in a single second. If we instantly fired off a new Worker Pool job for every micro-adjustment, we would spawn thousands of workers, crash the browser, and create massive memory leaks. 300 milliseconds is the standard UI sweet spot: it feels instantaneous to the human eye, but ensures the user has actually stopped moving their mouse before we begin heavy compute.
+
+---
+
+### `MAX_IN_FLIGHT_FRAMES = 24`
+
+**What is it?**
+A hard concurrency ceiling for our Web Worker pool. It dictates the absolute maximum number of uncompressed `VideoFrame` objects that are allowed to exist in memory at any given millisecond.
+
+**Why 24?**
+Decoding video into raw pixels takes a massive amount of RAM. If a user uploads a 60-second video and we try to decode all the sampled frames simultaneously, we will instantly cause an Out-Of-Memory (OOM) crash on mobile browsers (like iOS Safari), which strictly limit tab memory. `24` frames is a safe, tested buffer size. As workers finish grading frames and destroying them in memory, new frames are pulled from the queue, keeping RAM usage perfectly flat regardless of how long the video is.
+
+---
+
+## 7. Security and Malformed Input Ceilings
+
+Per our Threat Model (Rule 4), we do not trust the input file or the structural integrity of its internal MP4 boxes. The following ceilings ensure the browser tab cannot be crashed or hung by a pathological or adversarially crafted video file.
+
+### `MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024` (100 MB)
+**Why?** The browser must read the file stream. A massive multi-gigabyte file could exhaust tab resources or trick the user into a prolonged wait. We hard-cap processing to 100MB to enforce the POC's scope (short, portrait web videos).
+
+### `MAX_VIDEO_DURATION_SECONDS = 300` (5 mins)
+**Why?** Even if a file is heavily compressed and falls under 100MB, an maliciously crafted MP4 claiming to be 100 hours long could cause our sampler to queue up thousands of extraction jobs, leading to resource starvation. 5 minutes is a generous maximum for a Magic Hour source clip.
+
+### `MAX_VIDEO_RESOLUTION_WIDTH = 4096`, `HEIGHT = 4096`
+**Why?** Uncompressed 8K or 16K frames consume gigabytes of RAM instantly upon decoding, easily circumventing our 24-frame safety buffer. We reject any video reporting a resolution above 4K during the initial `mp4box` metadata read, immediately failing the pipeline before decoding begins.
+
+### `PIPELINE_TIMEOUT_MS = 15000` (15 Seconds)
+**Why?** If a video file is malformed in a way that doesn't trigger an explicit crash but causes the `mp4box` parser or the `VideoDecoder` to enter a pathological spin loop (or process pathologically slowly), the user's UI would hang indefinitely. This strict 15-second wall-clock timeout forces the entire orchestration pipeline to abort and fail open.

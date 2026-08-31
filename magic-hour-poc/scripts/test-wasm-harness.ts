@@ -12,8 +12,8 @@ async function runTest() {
     env: {
       abort: () => {
         throw new Error('WASM aborted');
-      }
-    }
+      },
+    },
   });
 
   const exports = wasmModule.instance.exports as any;
@@ -28,7 +28,7 @@ async function runTest() {
   const rgbaPtr = 131072;
   const outPtr = rgbaPtr + ANALYSIS_BUFFER_BYTES;
   const requiredMemory = outPtr + 16;
-  
+
   if (memory.buffer.byteLength < requiredMemory) {
     const pagesNeeded = Math.ceil((requiredMemory - memory.buffer.byteLength) / 65536);
     memory.grow(pagesNeeded);
@@ -51,7 +51,9 @@ async function runTest() {
   const solidGraySharpness = outArray[2];
   const solidGrayMotion = outArray[3];
 
-  console.log(`solid gray: faceCount=${solidGrayFaceCount}, conf=${solidGrayFaceConf}, sharpness=${solidGraySharpness}, motionDelta=${solidGrayMotion}`);
+  console.log(
+    `solid gray: faceCount=${solidGrayFaceCount}, conf=${solidGrayFaceConf}, sharpness=${solidGraySharpness}, motionDelta=${solidGrayMotion}`,
+  );
 
   for (let y = 0; y < ANALYSIS_HEIGHT; y++) {
     for (let x = 0; x < ANALYSIS_WIDTH; x++) {
@@ -71,10 +73,14 @@ async function runTest() {
   const checkerSharpness = outArray[2];
   const checkerMotion = outArray[3];
 
-  console.log(`checkerboard: faceCount=${checkerFaceCount}, conf=${checkerFaceConf}, sharpness=${checkerSharpness}, motionDelta=${checkerMotion}`);
+  console.log(
+    `checkerboard: faceCount=${checkerFaceCount}, conf=${checkerFaceConf}, sharpness=${checkerSharpness}, motionDelta=${checkerMotion}`,
+  );
 
   if (checkerSharpness <= solidGraySharpness) {
-    throw new Error('test-wasm-harness: checkerboard sharpness should be strictly greater than solid gray sharpness');
+    throw new Error(
+      'test-wasm-harness: checkerboard sharpness should be strictly greater than solid gray sharpness',
+    );
   }
 }
 
