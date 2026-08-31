@@ -169,3 +169,5 @@ $RECYCLE.BIN/
 build/*.wasm
 build/*.wasm.map
 build/*.wat
+
+test-assets/
