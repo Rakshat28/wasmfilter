@@ -65,13 +65,16 @@ export class IngestOrchestrator {
         frame.close();
       }
     } catch (err) {
-
+      if (err instanceof Error && err.message.includes('Aborted') || signal.aborted) {
+        throw err;
+      }
       log.error('IngestOrchestrator', 'Pipeline failed, failing open', err);
       return {
         pass: true,
         frameScores: [],
         badFrameRatio: 0,
         dominantFlags: [],
+        errorMsg: err instanceof Error ? err.message : String(err),
       };
     }
 
@@ -92,8 +95,7 @@ export class IngestOrchestrator {
 
     const totalFrames = frameScores.length;
     if (totalFrames === 0) {
-
-      return { pass: true, frameScores: [], badFrameRatio: 0, dominantFlags: [] };
+      return { pass: false, frameScores: [], badFrameRatio: 1, dominantFlags: ['NO_FACE'] };
     }
 
     let badFramesCount = 0;
@@ -132,6 +134,18 @@ export class IngestOrchestrator {
   private debounceTimer: number | null = null;
   private debounceGeneration = 0;
   private activeController: AbortController | null = null;
+
+  public abortCurrent(): void {
+    if (this.debounceTimer !== null) {
+      clearTimeout(this.debounceTimer);
+      this.debounceTimer = null;
+    }
+    if (this.activeController) {
+      this.activeController.abort();
+      this.activeController = null;
+    }
+    this.debounceGeneration++;
+  }
 
   public scoreWindowDebounced(
     file: File,

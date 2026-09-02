@@ -1,10 +1,9 @@
 import { loadScorer, ScorerExports } from './loader';
-import { WorkerScoreRequest, WorkerScoreResponse } from './types';
-
+import { WorkerScoreRequest, WorkerScoreResponse, WorkerResponse } from './types';
 
 const workerGlobal = self as unknown as {
   onmessage: ((e: MessageEvent<WorkerScoreRequest>) => Promise<void>) | null;
-  postMessage: (msg: WorkerScoreResponse) => void;
+  postMessage: (msg: WorkerResponse) => void;
 };
 
 
@@ -29,7 +28,14 @@ async function getScorer(): Promise<ScorerExports> {
 }
 
 
-void getScorer();
+void getScorer().then((scorer) => {
+  workerGlobal.postMessage({
+    type: 'WORKER_INIT',
+    heapBytes: scorer.memory.buffer.byteLength
+  });
+}).catch((err) => {
+  console.error('Worker failed to init', err);
+});
 
 workerGlobal.onmessage = async (e: MessageEvent<WorkerScoreRequest>): Promise<void> => {
   const request = e.data;

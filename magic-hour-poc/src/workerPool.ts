@@ -1,6 +1,6 @@
 import { log } from './log';
 import { MAX_IN_FLIGHT_FRAMES } from './thresholds';
-import { FrameScore, Seconds, WorkerScoreRequest, WorkerScoreResponse } from './types';
+import { FrameScore, Seconds, WorkerScoreRequest, WorkerResponse, WorkerScoreResponse } from './types';
 
 interface WorkerState {
   worker: Worker;
@@ -28,6 +28,7 @@ export class WorkerPool {
   >();
   private nextTaskId = 0;
   private inFlightCount = 0;
+  private totalHeapBytes = 0;
 
   constructor() {
     const numWorkers = Math.max(1, navigator.hardwareConcurrency - 1);
@@ -35,17 +36,25 @@ export class WorkerPool {
     for (let i = 0; i < numWorkers; i++) {
       const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
 
-      worker.onmessage = (e: MessageEvent<WorkerScoreResponse>): void => {
-        this.handleResponse(e.data, i);
+      worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
+        const data = e.data;
+        if (data.type === 'WORKER_INIT') {
+          this.totalHeapBytes += data.heapBytes;
+        } else if (data.type === 'FRAME_SCORE') {
+          this.handleResponse(data, i);
+        }
       };
 
       worker.onerror = (err: ErrorEvent): void => {
-
         log.error('WorkerPool', 'Worker failed unconditionally', err.message);
       };
 
       this.workers.push({ worker, available: true });
     }
+  }
+
+  public getApproxHeapMB(): number {
+    return this.totalHeapBytes / (1024 * 1024);
   }
 
   public score(timestamp: number, pixels: ArrayBuffer): Promise<Omit<FrameScore, 'flags'>> {

@@ -83,7 +83,13 @@ export async function* decodeWindow(
       }
     }
   } finally {
-    decoder.close();
+    if (decoder.state !== 'closed') {
+      try {
+        decoder.close();
+      } catch (e) {
+        // ignore close errors
+      }
+    }
   }
 }
 

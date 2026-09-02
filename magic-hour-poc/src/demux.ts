@@ -49,11 +49,11 @@ export async function* demuxWindow(
   let offset = 0;
   let videoTrackId = -1;
 
-  let lastKeyframeBeforeStart: MP4Sample | null = null;
   let yieldedKeyframe = false;
   let done = false;
 
   const pendingSamples: MP4Sample[] = [];
+  let bufferSinceLastKeyframe: MP4Sample[] = [];
   let errorObj: Error | null = null;
 
   mp4boxfile.onReady = (info: MP4Info): void => {
@@ -116,12 +116,16 @@ export async function* demuxWindow(
 
         if (timeSec < startSeconds) {
           if (sample.is_sync || sample.is_rap) {
-            lastKeyframeBeforeStart = sample;
+            bufferSinceLastKeyframe = [sample];
+          } else {
+            if (bufferSinceLastKeyframe.length > 0) {
+              bufferSinceLastKeyframe.push(sample);
+            }
           }
         } else if (timeSec >= startSeconds && timeSec <= endSeconds) {
           if (!yieldedKeyframe) {
-            if (lastKeyframeBeforeStart && !sample.is_sync && !sample.is_rap) {
-              yield createChunk(lastKeyframeBeforeStart);
+            for (const bufferedSample of bufferSinceLastKeyframe) {
+              yield createChunk(bufferedSample);
             }
             yieldedKeyframe = true;
           }
@@ -139,8 +143,15 @@ export async function* demuxWindow(
         break;
       }
 
-      const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-      const buffer = chunk.buffer as MP4ArrayBuffer;
+      let buffer: MP4ArrayBuffer;
+      if (value.byteOffset === 0 && value.byteLength === value.buffer.byteLength) {
+        buffer = value.buffer as MP4ArrayBuffer;
+      } else {
+        buffer = value.buffer.slice(
+          value.byteOffset,
+          value.byteOffset + value.byteLength,
+        ) as MP4ArrayBuffer;
+      }
       buffer.fileStart = offset;
 
       offset = mp4boxfile.appendBuffer(buffer);
@@ -221,8 +232,15 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
             reject(new Error('getVideoConfig: Stream ended without firing onReady'));
             break;
           }
-          const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
-          const buffer = chunk.buffer as MP4ArrayBuffer;
+          let buffer: MP4ArrayBuffer;
+          if (value.byteOffset === 0 && value.byteLength === value.buffer.byteLength) {
+            buffer = value.buffer as MP4ArrayBuffer;
+          } else {
+            buffer = value.buffer.slice(
+              value.byteOffset,
+              value.byteOffset + value.byteLength,
+            ) as MP4ArrayBuffer;
+          }
           buffer.fileStart = offset;
           offset = mp4boxfile.appendBuffer(buffer);
         }

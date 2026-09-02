@@ -16,6 +16,7 @@ export interface IngestVerdict {
   readonly frameScores: ReadonlyArray<FrameScore>;
   readonly badFrameRatio: number;
   readonly dominantFlags: ReadonlyArray<FrameFlag>;
+  readonly errorMsg?: string;
 }
 
 export interface WorkerScoreRequest {
@@ -33,6 +34,13 @@ export interface WorkerScoreResponse {
   readonly sharpness: number;
   readonly motionDelta: number;
 }
+
+export interface WorkerInitResponse {
+  readonly type: 'WORKER_INIT';
+  readonly heapBytes: number;
+}
+
+export type WorkerResponse = WorkerScoreResponse | WorkerInitResponse;
 
 export function assertNever(x: never): never {
   throw new Error('Unexpected value: ' + String(x));
