@@ -34,10 +34,10 @@ export async function* demuxWindow(
 
   const headerView = new Uint8Array(header);
   if (
-    headerView[4] !== 0x66 || // 'f'
-    headerView[5] !== 0x74 || // 't'
-    headerView[6] !== 0x79 || // 'y'
-    headerView[7] !== 0x70 // 'p'
+    headerView[4] !== 0x66 ||
+    headerView[5] !== 0x74 ||
+    headerView[6] !== 0x79 ||
+    headerView[7] !== 0x70
   ) {
     throw new Error('demuxWindow: Invalid magic bytes; not an MP4 (missing ftyp box)');
   }
@@ -139,7 +139,8 @@ export async function* demuxWindow(
         break;
       }
 
-      const buffer = value.buffer as MP4ArrayBuffer;
+      const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+      const buffer = chunk.buffer as MP4ArrayBuffer;
       buffer.fileStart = offset;
 
       offset = mp4boxfile.appendBuffer(buffer);
@@ -167,6 +168,7 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
     const mp4boxfile = MP4Box.createFile();
     const reader = file.stream().getReader();
     let offset = 0;
+    let trackId = -1;
 
     mp4boxfile.onReady = (info: MP4Info): void => {
       if (info.videoTracks.length === 0) {
@@ -175,18 +177,31 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
       }
       const track = info.videoTracks[0];
 
-      // MP4Box exposes the Uint8Array description for AVC/HEVC under the track's meta.
-      // Usually it's in track.description or we just pass the codec. We'll pass what WebCodecs expects.
+      let description: Uint8Array | undefined;
+      
+
+      const trak = (mp4boxfile as any).moov.traks.find((t: any) => t.tkhd.track_id === track.id);
+      if (trak) {
+        const entries = trak.mdia.minf.stbl.stsd.entries;
+        for (const entry of entries) {
+          const box = entry.avcC || entry.hvcC || entry.vpcC || entry.av1C;
+          if (box) {
+            const DataStream = (MP4Box as any).DataStream;
+            const stream = new DataStream(undefined, 0, DataStream.BIG_ENDIAN);
+            box.write(stream);
+
+            description = new Uint8Array(stream.buffer, 8);
+            break;
+          }
+        }
+      }
 
       const config: VideoDecoderConfig = {
         codec: track.codec,
         codedWidth: track.video?.width,
         codedHeight: track.video?.height,
+        description: description,
       };
-
-      // Extract the avcC box (or similar) from the track if present
-      // Some versions of mp4box attach the raw description bytes to track or it's needed from samples.
-      // Actually, if we use sample.description, it's there. But for now we just try without.
 
       reader.releaseLock();
       resolve(config);
@@ -206,7 +221,8 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
             reject(new Error('getVideoConfig: Stream ended without firing onReady'));
             break;
           }
-          const buffer = value.buffer as MP4ArrayBuffer;
+          const chunk = new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+          const buffer = chunk.buffer as MP4ArrayBuffer;
           buffer.fileStart = offset;
           offset = mp4boxfile.appendBuffer(buffer);
         }

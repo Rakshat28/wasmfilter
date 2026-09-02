@@ -9,6 +9,8 @@ The core computer vision logic is written in AssemblyScript and compiled to WebA
 
 **Fail-Open Design**: If the pipeline encounters a fatally corrupted file, an unsupported codec, or a pathological box structure that triggers our timeouts, the ingest process will **fail open**. Instead of crashing the UI, the orchestrator will catch the error, log `"demux failed"` or `"decode failed"`, and return a clean `pass: true` verdict. This ensures the user is never permanently blocked from uploading a video just because our client-side POC decoder couldn't read it.
 
+**Fonts**: Per the strict isolation and no-CDN rule, the UI uses a self-hosted `JetBrains Mono` font served locally from `public/fonts/` rather than relying on Google Fonts or system fallbacks.
+
 Because WebAssembly requires a `.wasm` binary to be explicitly served to the browser, we have configured the build pipeline as follows:
 
 1. Running `npm run build:wasm` triggers the AssemblyScript compiler (`asc`).

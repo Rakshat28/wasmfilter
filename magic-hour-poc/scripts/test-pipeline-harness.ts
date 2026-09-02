@@ -13,6 +13,20 @@ function printOut(msg: string) {
   console.log(msg);
 }
 
+// Hook console.error to print to screen for debugging
+const originalConsoleError = console.error;
+console.error = function (...args) {
+  printOut(`[CONSOLE ERROR] ${args.map(a => (a instanceof Error ? a.stack || a.message : String(a))).join(' ')}`);
+  originalConsoleError.apply(console, args);
+};
+
+// Also hook console.warn just in case
+const originalConsoleWarn = console.warn;
+console.warn = function (...args) {
+  printOut(`[CONSOLE WARN] ${args.map(a => (a instanceof Error ? a.stack || a.message : String(a))).join(' ')}`);
+  originalConsoleWarn.apply(console, args);
+};
+
 async function runTest() {
   printOut('Starting Pipeline Integration Test...\n');
   
@@ -41,7 +55,11 @@ async function runTest() {
       const end = performance.now();
       
       printOut(`-> Time taken: ${((end - start) / 1000).toFixed(2)}s`);
-      printOut(`-> Verdict: pass=${verdict.pass}, dominantFlags=[${verdict.dominantFlags.join(',')}]`);
+      printOut(`-> Verdict: pass=${verdict.pass}, framesAnalyzed=${verdict.frameScores.length}, dominantFlags=[${verdict.dominantFlags.join(',')}]`);
+      if (verdict.frameScores.length > 0) {
+        const scores = verdict.frameScores.map(s => `fc:${s.faceCount}, sh:${s.sharpness.toFixed(1)}`).join(' | ');
+        printOut(`   Scores: ${scores}`);
+      }
       
       let passMatch = verdict.pass === t.expectedPass;
       let flagMatch = true;

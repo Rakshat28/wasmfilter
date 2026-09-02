@@ -21,7 +21,7 @@ export class IngestOrchestrator {
     const targetTimestamps: number[] = [];
     for (
       let t = startSeconds;
-      t <= endSeconds + 0.0001; // epsilon for float math
+      t <= endSeconds + 0.0001;
       t += 1 / SAMPLE_FPS
     ) {
       targetTimestamps.push(t);
@@ -47,12 +47,11 @@ export class IngestOrchestrator {
         const frameTimeSec = frame.timestamp / 1000000;
         const targetTimeSec = targetTimestamps[nextTargetIndex];
 
-        // Check if within tolerance
+
         if (Math.abs(frameTimeSec - targetTimeSec) <= tolerance) {
           try {
             const pixels = downscaleFrame(frame);
-            // Copy pixels to a fresh buffer to ensure it's precisely 57600 bytes and safe to transfer
-            // without inadvertently transferring a larger shared canvas backing buffer if the browser did that.
+
             const transferBuffer = new Uint8ClampedArray(pixels).buffer;
 
             scorePromises.push(this.pool.score(targetTimeSec, transferBuffer));
@@ -62,13 +61,11 @@ export class IngestOrchestrator {
           }
         }
 
-        // Always close the frame
+
         frame.close();
       }
     } catch (err) {
-      // Decode or demux failed. Re-throw to be caught by P2-12 error handling wrapper.
-      // Wait, P2-12 says "In orchestrator.ts's scoreWindow, catch that error and return a special IngestVerdict... i.e. fail open"
-      // I will implement P2-12 logic here directly to satisfy the "fail open" rule.
+
       log.error('IngestOrchestrator', 'Pipeline failed, failing open', err);
       return {
         pass: true,
@@ -82,7 +79,7 @@ export class IngestOrchestrator {
       throw new Error('scoreWindow: Aborted via signal');
     }
 
-    // Await all submissions
+
     const rawScores = await Promise.all(scorePromises);
 
     const frameScores: FrameScore[] = rawScores.map((raw) => {
@@ -95,7 +92,7 @@ export class IngestOrchestrator {
 
     const totalFrames = frameScores.length;
     if (totalFrames === 0) {
-      // If we got no frames at all, it's functionally a failure to read, but fail open per P2-12.
+
       return { pass: true, frameScores: [], badFrameRatio: 0, dominantFlags: [] };
     }
 
@@ -146,7 +143,7 @@ export class IngestOrchestrator {
       window.clearTimeout(this.debounceTimer);
     }
 
-    // Abort any currently in-flight process
+
     if (this.activeController !== null) {
       this.activeController.abort();
     }
@@ -155,9 +152,7 @@ export class IngestOrchestrator {
     this.activeController = new AbortController();
     const signal = this.activeController.signal;
 
-    // We use window.setTimeout because Node.js setTimeout returns a Timeout object,
-    // which fails TypeScript if we try to assign it to `number | null` unless we typecast.
-    // Since this runs in browser, `window.setTimeout` strictly returns `number`.
+
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
 
@@ -168,7 +163,7 @@ export class IngestOrchestrator {
           }
         })
         .catch((err) => {
-          // If aborted, we just ignore. Other errors should have failed open.
+
           if (err instanceof Error && err.message.includes('Aborted')) {
             return;
           }

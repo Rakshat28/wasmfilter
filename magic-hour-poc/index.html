@@ -1,29 +1,13 @@
 <!DOCTYPE html>
 <html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <title>Magic Hour POC Test</title>
-</head>
-<body>
-  <div id="app">Testing WASM Loader... check console.</div>
-  <script type="module">
-    import { loadScorer } from './src/loader.ts';
-    
-    async function testLoader() {
-      try {
-        const scorer = await loadScorer();
-        console.log('Loader successful!', scorer);
-        if (typeof scorer.scoreFrame === 'function') {
-          console.log('scoreFrame is callable!');
-          document.getElementById('app').innerText = 'WASM loaded successfully!';
-        }
-      } catch (err) {
-        console.error('Loader failed:', err);
-        document.getElementById('app').innerText = 'WASM load failed!';
-      }
-    }
-    
-    testLoader();
-  </script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Magic Hour POC</title>
+    <link rel="stylesheet" href="/src/ui/theme.css" />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
 </html>

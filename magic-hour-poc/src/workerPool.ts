@@ -40,9 +40,7 @@ export class WorkerPool {
       };
 
       worker.onerror = (err: ErrorEvent): void => {
-        // Find if this worker was processing a task
-        // We don't have a direct map of worker -> taskId in this simplified state,
-        // so this is a basic fallback. Real implementation might need stronger ties.
+
         log.error('WorkerPool', 'Worker failed unconditionally', err.message);
       };
 

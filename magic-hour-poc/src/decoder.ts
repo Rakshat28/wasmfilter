@@ -19,7 +19,7 @@ export async function* decodeWindow(
 
   const decoder = new VideoDecoder({
     output: (frame: VideoFrame): void => {
-      // Time in microseconds to seconds
+
       const timeSec = frame.timestamp / 1000000;
       if (timeSec >= startSeconds && timeSec <= endSeconds) {
         frameQueue.push(frame);
@@ -42,7 +42,7 @@ export async function* decodeWindow(
 
   const demuxer = demuxWindow(file, startSeconds, endSeconds, signal);
 
-  // Background task to feed the decoder
+
   void (async (): Promise<void> => {
     try {
       for await (const chunk of demuxer) {
@@ -75,7 +75,7 @@ export async function* decodeWindow(
       } else if (isFlushed) {
         break;
       } else {
-        // Wait for more frames or error or flush
+
         await new Promise<void>((resolve) => {
           state.resolveNext = resolve;
         });
@@ -87,7 +87,7 @@ export async function* decodeWindow(
   }
 }
 
-// Module-level OffscreenCanvas for P2-06
+
 let offscreenCanvas: OffscreenCanvas | null = null;
 let offscreenCtx: OffscreenCanvasRenderingContext2D | null = null;
 

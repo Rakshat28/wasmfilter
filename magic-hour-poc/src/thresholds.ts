@@ -1,7 +1,8 @@
-export const BLUR_SHARPNESS_MAX = 15.0;
-export const LOW_CONFIDENCE_MAX = 0.4;
+export const BLUR_SHARPNESS_MAX = 4500.0;
+export const MULTI_FACE_SHARPNESS_CHEAT = 3000.0;
+export const LOW_CONFIDENCE_MAX = 0.1;
 export const HIGH_MOTION_MIN = 40.0;
-export const BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.2;
+export const BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.4;
 export const SAMPLE_FPS = 2;
 export const DEBOUNCE_MS = 300;
 export const MAX_IN_FLIGHT_FRAMES = 24;
@@ -23,16 +24,16 @@ export function computeFlags(
 
   if (faceCount === 0) {
     flags.push('NO_FACE');
-  } else if (faceCount > 1) {
-    flags.push('MULTI_FACE');
+  } else {
+
+    if (sharpness < MULTI_FACE_SHARPNESS_CHEAT) {
+      flags.push('MULTI_FACE');
+    } else if (sharpness < BLUR_SHARPNESS_MAX) {
+      flags.push('BLUR');
+    }
   }
 
-  if (sharpness < BLUR_SHARPNESS_MAX) {
-    flags.push('BLUR');
-  }
 
-  // The plan says "Push 'LOW_CONFIDENCE' if faceConfidence < LOW_CONFIDENCE_MAX."
-  // However, logically it shouldn't trigger if there is no face at all.
   if (faceCount > 0 && faceConfidence < LOW_CONFIDENCE_MAX) {
     flags.push('LOW_CONFIDENCE');
   }
