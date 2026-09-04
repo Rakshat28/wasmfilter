@@ -4,20 +4,35 @@ import { BAD_FRAME_RATIO_FAIL_THRESHOLD, DEBOUNCE_MS, SAMPLE_FPS } from './thres
 import { computeFlags } from './thresholds';
 import { FrameFlag, FrameScore, IngestVerdict } from './types';
 import { WorkerPool } from './workerPool';
+import { MlWorkerPool } from './mlWorkerPool';
 
 export class IngestOrchestrator {
-  private pool: WorkerPool;
+  private fastPool: WorkerPool;
+  private fullPool: MlWorkerPool;
 
-  constructor(pool: WorkerPool) {
-    this.pool = pool;
+  constructor(fastPool: WorkerPool, fullPool: MlWorkerPool) {
+    this.fastPool = fastPool;
+    this.fullPool = fullPool;
   }
 
-  public async scoreWindow(
+  private async _scoreWindow(
     file: File,
     startSeconds: number,
     endSeconds: number,
     signal: AbortSignal,
+    pool: WorkerPool | MlWorkerPool
   ): Promise<IngestVerdict> {
+    if (typeof window.VideoDecoder === 'undefined') {
+      log.error('IngestOrchestrator', 'WebCodecs not supported on this device, failing open', null);
+      return {
+        pass: true,
+        frameScores: [],
+        badFrameRatio: 0,
+        dominantFlags: [],
+        errorMsg: 'WebCodecs not supported'
+      };
+    }
+
     const targetTimestamps: number[] = [];
     for (
       let t = startSeconds;
@@ -47,20 +62,20 @@ export class IngestOrchestrator {
         const frameTimeSec = frame.timestamp / 1000000;
         const targetTimeSec = targetTimestamps[nextTargetIndex];
 
-
         if (Math.abs(frameTimeSec - targetTimeSec) <= tolerance) {
           try {
             const pixels = downscaleFrame(frame);
-
             const transferBuffer = new Uint8ClampedArray(pixels).buffer;
 
-            scorePromises.push(this.pool.score(targetTimeSec, transferBuffer));
+            // Worker pools might have different signatures depending on the type, but let's assume they both accept width/height
+            // We reverted WorkerPool to include width/height if we kept it? Wait! In workerPool.ts I kept width/height in the interface!
+            // Let's make sure both pools accept width and height. Yes, they do.
+            scorePromises.push(pool.score(targetTimeSec, transferBuffer, 160, 90));
             nextTargetIndex++;
           } catch (err) {
             log.error('IngestOrchestrator', 'Failed to downscale/submit frame', err);
           }
         }
-
 
         frame.close();
       }
@@ -82,11 +97,10 @@ export class IngestOrchestrator {
       throw new Error('scoreWindow: Aborted via signal');
     }
 
-
     const rawScores = await Promise.all(scorePromises);
 
     const frameScores: FrameScore[] = rawScores.map((raw) => {
-      const flags = computeFlags(raw.faceCount, raw.faceConfidence, raw.sharpness, raw.motionDelta);
+      const flags = computeFlags(raw.faceCount, raw.faceConfidence, raw.framingScore, raw.isClipped, raw.sharpness, raw.motionDelta);
       return {
         ...raw,
         flags,
@@ -131,6 +145,25 @@ export class IngestOrchestrator {
     };
   }
 
+  public async scoreWindowFast(
+    file: File,
+    startSeconds: number,
+    endSeconds: number,
+    signal: AbortSignal,
+  ): Promise<IngestVerdict> {
+    return this._scoreWindow(file, startSeconds, endSeconds, signal, this.fastPool);
+  }
+
+  public async scoreWindowFull(
+    file: File,
+    startSeconds: number,
+    endSeconds: number,
+    signal: AbortSignal,
+  ): Promise<IngestVerdict> {
+    this.fullPool.resetKillSwitch();
+    return this._scoreWindow(file, startSeconds, endSeconds, signal, this.fullPool);
+  }
+
   private debounceTimer: number | null = null;
   private debounceGeneration = 0;
   private activeController: AbortController | null = null;
@@ -147,7 +180,7 @@ export class IngestOrchestrator {
     this.debounceGeneration++;
   }
 
-  public scoreWindowDebounced(
+  public scoreWindowFastDebounced(
     file: File,
     startSeconds: number,
     endSeconds: number,
@@ -157,7 +190,6 @@ export class IngestOrchestrator {
       window.clearTimeout(this.debounceTimer);
     }
 
-
     if (this.activeController !== null) {
       this.activeController.abort();
     }
@@ -166,22 +198,20 @@ export class IngestOrchestrator {
     this.activeController = new AbortController();
     const signal = this.activeController.signal;
 
-
     this.debounceTimer = window.setTimeout(() => {
       this.debounceTimer = null;
 
-      void this.scoreWindow(file, startSeconds, endSeconds, signal)
+      void this.scoreWindowFast(file, startSeconds, endSeconds, signal)
         .then((verdict) => {
           if (currentGeneration === this.debounceGeneration) {
             onResult(verdict);
           }
         })
         .catch((err) => {
-
           if (err instanceof Error && err.message.includes('Aborted')) {
             return;
           }
-          log.error('IngestOrchestrator', 'Unexpected error from scoreWindow', err);
+          log.error('IngestOrchestrator', 'Unexpected error from scoreWindowFast', err);
         });
     }, DEBOUNCE_MS);
   }

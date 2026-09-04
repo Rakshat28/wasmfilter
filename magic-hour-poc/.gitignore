@@ -173,3 +173,9 @@ public/scorer.wasm
 
 # Ignore large test videos
 public/test-assets/
+public/wasm
+
+# Phase 3 ML Calibration Data
+dataset/
+calibration_results.json
+raw_scores.csv

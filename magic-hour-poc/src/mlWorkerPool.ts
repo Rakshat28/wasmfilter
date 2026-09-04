@@ -2,11 +2,6 @@ import { log } from './log';
 import { MAX_IN_FLIGHT_FRAMES } from './thresholds';
 import { FrameScore, Seconds, WorkerScoreRequest, WorkerResponse, WorkerScoreResponse } from './types';
 
-interface WorkerState {
-  worker: Worker;
-  available: boolean;
-}
-
 interface QueuedRequest {
   taskId: number;
   timestamp: Seconds;
@@ -17,42 +12,36 @@ interface QueuedRequest {
   reject: (err: Error) => void;
 }
 
-export class WorkerPool {
-  private workers: WorkerState[] = [];
+export class MlWorkerPool {
+  private worker: Worker;
+  private workerAvailable = true;
   private queue: QueuedRequest[] = [];
-  private pendingResolvers = new Map<
-    number,
-    {
-      timestamp: Seconds;
-      resolve: (score: Omit<FrameScore, 'flags'>) => void;
-      reject: (err: Error) => void;
-    }
-  >();
+  private pendingResolver: {
+    taskId: number;
+    timestamp: Seconds;
+    resolve: (score: Omit<FrameScore, 'flags'>) => void;
+    reject: (err: Error) => void;
+  } | null = null;
   private nextTaskId = 0;
   private inFlightCount = 0;
   private totalHeapBytes = 0;
 
   constructor() {
-    const numWorkers = Math.max(1, navigator.hardwareConcurrency - 1);
+    // Exactly one worker for ML to avoid OOM
+    this.worker = new Worker(new URL('./mlWorker.ts', import.meta.url), { type: 'module' });
 
-    for (let i = 0; i < numWorkers; i++) {
-      const worker = new Worker(new URL('./worker.ts', import.meta.url), { type: 'module' });
+    this.worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
+      const data = e.data;
+      if (data.type === 'WORKER_INIT') {
+        this.totalHeapBytes += data.heapBytes;
+      } else if (data.type === 'FRAME_SCORE') {
+        this.handleResponse(data);
+      }
+    };
 
-      worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
-        const data = e.data;
-        if (data.type === 'WORKER_INIT') {
-          this.totalHeapBytes += data.heapBytes;
-        } else if (data.type === 'FRAME_SCORE') {
-          this.handleResponse(data, i);
-        }
-      };
-
-      worker.onerror = (err: ErrorEvent): void => {
-        log.error('WorkerPool', 'Worker failed unconditionally', err.message);
-      };
-
-      this.workers.push({ worker, available: true });
-    }
+    this.worker.onerror = (err: ErrorEvent): void => {
+      log.error('MlWorkerPool', 'Worker failed unconditionally', err.message);
+    };
   }
 
   public getApproxHeapMB(): number {
@@ -62,7 +51,7 @@ export class WorkerPool {
   public score(timestamp: number, pixels: ArrayBuffer, width: number, height: number): Promise<Omit<FrameScore, 'flags'>> {
     if (this.inFlightCount + this.queue.length >= MAX_IN_FLIGHT_FRAMES) {
       return Promise.reject(
-        new Error(`WorkerPool: MAX_IN_FLIGHT_FRAMES (${MAX_IN_FLIGHT_FRAMES}) exceeded`),
+        new Error(`MlWorkerPool: MAX_IN_FLIGHT_FRAMES (${MAX_IN_FLIGHT_FRAMES}) exceeded`),
       );
     }
 
@@ -70,10 +59,8 @@ export class WorkerPool {
     const tsSeconds = timestamp as Seconds;
 
     return new Promise((resolve, reject) => {
-      const availableIndex = this.workers.findIndex((w) => w.available);
-
-      if (availableIndex !== -1) {
-        this.dispatch(availableIndex, taskId, tsSeconds, pixels, width, height, resolve, reject);
+      if (this.workerAvailable) {
+        this.dispatch(taskId, tsSeconds, pixels, width, height, resolve, reject);
       } else {
         this.queue.push({ taskId, timestamp: tsSeconds, pixels, width, height, resolve, reject });
       }
@@ -81,7 +68,6 @@ export class WorkerPool {
   }
 
   private dispatch(
-    workerIndex: number,
     taskId: number,
     timestamp: Seconds,
     pixels: ArrayBuffer,
@@ -90,9 +76,9 @@ export class WorkerPool {
     resolve: (score: Omit<FrameScore, 'flags'>) => void,
     reject: (err: Error) => void,
   ): void {
-    this.workers[workerIndex].available = false;
+    this.workerAvailable = false;
     this.inFlightCount++;
-    this.pendingResolvers.set(taskId, { timestamp, resolve, reject });
+    this.pendingResolver = { taskId, timestamp, resolve, reject };
 
     const request: WorkerScoreRequest = {
       type: 'SCORE_FRAME',
@@ -103,13 +89,13 @@ export class WorkerPool {
       height
     };
 
-    this.workers[workerIndex].worker.postMessage(request, [pixels]);
+    this.worker.postMessage(request, [pixels]);
   }
 
-  private handleResponse(response: WorkerScoreResponse, workerIndex: number): void {
-    const state = this.pendingResolvers.get(response.taskId);
-    if (state !== undefined) {
-      this.pendingResolvers.delete(response.taskId);
+  private handleResponse(response: WorkerScoreResponse): void {
+    const state = this.pendingResolver;
+    if (state !== null && state.taskId === response.taskId) {
+      this.pendingResolver = null;
       this.inFlightCount--;
 
       const score: Omit<FrameScore, 'flags'> = {
@@ -125,12 +111,11 @@ export class WorkerPool {
       state.resolve(score);
     }
 
-    this.workers[workerIndex].available = true;
+    this.workerAvailable = true;
 
     if (this.queue.length > 0) {
       const nextTask = this.queue.shift() as QueuedRequest;
       this.dispatch(
-        workerIndex,
         nextTask.taskId,
         nextTask.timestamp,
         nextTask.pixels,
@@ -140,5 +125,9 @@ export class WorkerPool {
         nextTask.reject,
       );
     }
+  }
+
+  public resetKillSwitch(): void {
+    this.worker.postMessage({ type: 'RESET_KILL_SWITCH' });
   }
 }

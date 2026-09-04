@@ -86,7 +86,7 @@ export async function* decodeWindow(
     if (decoder.state !== 'closed') {
       try {
         decoder.close();
-      } catch (e) {
+      } catch {
         // ignore close errors
       }
     }

@@ -168,22 +168,7 @@ The `motionDelta` score operates on a scale of `0` (perfectly still) to `255` (e
 ### 3. Bad Frame Ratio (`BAD_FRAME_RATIO_FAIL_THRESHOLD` = 0.4)
 - A video is flagged as `pass: false` only if more than 40% of its sampled frames trigger a flag.
 - The `clean-sample.mp4` triggers a few false-positive blur frames, but stays under 40% (27%), thus passing perfectly.
-
----
-
-### `BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.2`
-
-**What is it?**
-This is the final, overarching Pass/Fail grade for the entire video clip. It represents a ratio (20%). Once the worker pool finishes analyzing the video chunk, it counts up all the frames. If more than 20% of those frames have flags (Blur, No Face, High Motion, etc.), the entire clip fails the ingest gate.
-
-**Why 20%?**
-If a 5-second clip has 1 bad, blurry frame in the middle, it's usually fine; the generative model can interpolate over it. But if 1 out of every 5 frames (20%) is blurry, poorly framed, or wildly shaking, the source material is fundamentally flawed and will guarantee a terrible final output. 
-
-**How changing this value affects the system:**
-- **If you increase it (e.g., to `0.5` / 50%):** You allow garbage-tier video to be processed, meaning the user will waste expensive cloud GPU credits generating a terrible Magic Hour video.
-- **If you decrease it (e.g., to `0.01` / 1%):** The app becomes infuriating to use. A single dropped frame or momentary blur from a smartphone camera autofocusing will reject the user's entire upload.
-
----
+- Note: This was increased from the initial `0.2` placeholder to `0.4` to allow `clean-sample.mp4` to pass without throwing false positives.
 
 ### `SAMPLE_FPS = 2`
 

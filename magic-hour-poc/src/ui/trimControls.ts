@@ -2,7 +2,7 @@ export function createTrimControls(
   container: HTMLElement,
   videoDuration: number,
   onChange: (start: number, end: number) => void,
-  onInput: () => void
+  onInput: (start: number, end: number) => void
 ): void {
   container.innerHTML = `
     <div class="trim-inputs" style="flex-direction: column; width: 100%;">
@@ -77,8 +77,8 @@ export function createTrimControls(
       }
     }
 
-    if (isInitialized) {
-      onInput();
+    if (isInitialized && isValid) {
+      onInput(startVal, endVal);
     }
   }
 

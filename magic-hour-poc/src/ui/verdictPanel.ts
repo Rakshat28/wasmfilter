@@ -18,15 +18,16 @@ export function createVerdictPanel(container: HTMLElement): {
   const proceedBtn = container.querySelector('#proceed-btn') as HTMLButtonElement;
 
   return {
-    appendLine: (score: FrameScore) => {
+    appendLine: (score: FrameScore): void => {
       const line = document.createElement('div');
       
       const tStr = score.t.toFixed(1);
       const confStr = score.faceConfidence.toFixed(2);
+      const framingStr = score.framingScore.toFixed(2);
       const sharpStr = score.flags.includes('BLUR') ? 'BAD' : 'OK';
       const rejectStr = score.flags.length > 0 ? ' REJECT: ' + score.flags.join(',') : '';
       
-      line.textContent = `[t=${tStr}s] face=${score.faceCount} conf=${confStr} sharp=${sharpStr}${rejectStr}`;
+      line.textContent = `[t=${tStr}s] face=${score.faceCount} conf=${confStr} frame=${framingStr} sharp=${sharpStr}${rejectStr}`;
       
       if (score.flags.length === 0) {
         line.style.color = 'var(--success)';
@@ -38,16 +39,16 @@ export function createVerdictPanel(container: HTMLElement): {
       logContainer.scrollTop = logContainer.scrollHeight;
     },
     
-    clear: () => {
+    clear: (): void => {
       logContainer.innerHTML = '';
     },
     
-    showProceedButton: (onProceed: () => void) => {
+    showProceedButton: (onProceed: () => void): void => {
       btnContainer.style.display = 'block';
       proceedBtn.onclick = onProceed;
     },
     
-    hideProceedButton: () => {
+    hideProceedButton: (): void => {
       btnContainer.style.display = 'none';
       proceedBtn.onclick = null;
     }

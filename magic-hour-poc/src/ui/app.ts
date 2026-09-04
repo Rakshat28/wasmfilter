@@ -1,4 +1,5 @@
 import { WorkerPool } from '../workerPool';
+import { MlWorkerPool } from '../mlWorkerPool';
 import { IngestOrchestrator } from '../orchestrator';
 import { createTrimControls } from './trimControls';
 import { createMetricsStrip } from './metricsStrip';
@@ -7,7 +8,8 @@ import { SAMPLE_FPS } from '../thresholds';
 
 export function initApp(root: HTMLElement): void {
   const pool = new WorkerPool();
-  const orchestrator = new IngestOrchestrator(pool);
+  const fullPool = new MlWorkerPool();
+  const orchestrator = new IngestOrchestrator(pool, fullPool);
 
   root.innerHTML = `
     <div class="app-header">
@@ -41,25 +43,26 @@ export function initApp(root: HTMLElement): void {
   const generateBtn = root.querySelector('#generate-btn') as HTMLButtonElement;
 
   let fileUrl: string | null = null;
-  let latestVerdict: any = null;
+  let fullCheckController: AbortController | null = null;
 
-  fileInput.addEventListener('change', async (e) => {
-    const file = (e.target as HTMLInputElement).files?.[0];
-    if (!file) return;
+  fileInput.addEventListener('change', (e: Event): void => {
+    void (async (): Promise<void> => {
+      const file = (e.target as HTMLInputElement).files?.[0];
+      if (!file) return;
 
-    if (fileUrl) {
-      URL.revokeObjectURL(fileUrl);
-    }
-    fileUrl = URL.createObjectURL(file);
+      if (fileUrl) {
+        URL.revokeObjectURL(fileUrl);
+      }
+      fileUrl = URL.createObjectURL(file);
 
-    // Read duration
-    const tempVideo = document.createElement('video');
-    tempVideo.src = fileUrl;
-    
-    await new Promise<void>((resolve, reject) => {
-      tempVideo.onloadedmetadata = () => resolve();
-      tempVideo.onerror = () => reject(new Error('Failed to load video metadata'));
-    });
+      // Read duration
+      const tempVideo = document.createElement('video');
+      tempVideo.src = fileUrl;
+      
+      await new Promise<void>((resolve, reject) => {
+        tempVideo.onloadedmetadata = (): void => resolve();
+        tempVideo.onerror = (): void => reject(new Error('Failed to load video metadata'));
+      });
 
     const duration = tempVideo.duration;
 
@@ -86,13 +89,24 @@ export function initApp(root: HTMLElement): void {
       controlsContainer,
       duration,
       (start, end) => {
+        orchestrator.abortCurrent();
         verdictPanel.clear();
         verdictPanel.hideProceedButton();
         generateBtn.disabled = true;
 
-        orchestrator.scoreWindowDebounced(file, start, end, (verdict) => {
-          latestVerdict = verdict;
-          verdictPanel.clear(); // clear again just in case
+        const promptLine = document.createElement('div');
+        promptLine.textContent = '> RUNNING FULL ML CHECK (MediaPipe)...';
+        promptLine.style.color = 'var(--fg-muted)';
+        promptLine.style.fontStyle = 'italic';
+        document.querySelector('#verdict-log')?.appendChild(promptLine);
+
+        if (fullCheckController) {
+          fullCheckController.abort();
+        }
+        fullCheckController = new AbortController();
+
+        void orchestrator.scoreWindowFull(file, start, end, fullCheckController.signal).then((verdict) => {
+          verdictPanel.clear();
 
           verdict.frameScores.forEach((score) => {
             verdictPanel.appendLine(score);
@@ -108,7 +122,7 @@ export function initApp(root: HTMLElement): void {
 
           metricsStrip.update(
             SAMPLE_FPS,
-            pool.getApproxHeapMB(),
+            fullPool.getApproxHeapMB() + pool.getApproxHeapMB(),
             verdict.frameScores.map((s) => s.faceConfidence)
           );
 
@@ -121,22 +135,37 @@ export function initApp(root: HTMLElement): void {
           } else {
             generateBtn.disabled = false;
           }
+        }).catch((err) => {
+          if (err instanceof Error && err.message.includes('Aborted')) return;
+          // Use console error only sparingly or replace with log.error. But we can't import log here easily if we haven't. Let's just catch it.
         });
       },
-      () => {
-        // onInput handler: cancel any running analysis, reset metrics, clear logs, lock buttons
-        orchestrator.abortCurrent();
-        verdictPanel.clear();
-        verdictPanel.hideProceedButton();
+      (start, end) => {
+        if (fullCheckController) {
+          fullCheckController.abort();
+        }
         generateBtn.disabled = true;
         
-        metricsStrip.update(0, pool.getApproxHeapMB(), []);
-        
-        const promptLine = document.createElement('div');
-        promptLine.textContent = '> TRIM CHANGED: Press CONFIRM TRIM to begin analysis...';
-        promptLine.style.color = 'var(--fg-muted)';
-        promptLine.style.fontStyle = 'italic';
-        document.querySelector('#verdict-log')?.appendChild(promptLine);
+        orchestrator.scoreWindowFastDebounced(file, start, end, (verdict) => {
+          verdictPanel.clear();
+          verdictPanel.hideProceedButton();
+
+          verdict.frameScores.forEach((score) => {
+            verdictPanel.appendLine(score);
+          });
+          
+          metricsStrip.update(
+            SAMPLE_FPS,
+            pool.getApproxHeapMB() + fullPool.getApproxHeapMB(),
+            []
+          );
+          
+          const promptLine = document.createElement('div');
+          promptLine.textContent = '> FAST CHECK COMPLETE. Press CONFIRM TRIM to run full ML validation...';
+          promptLine.style.color = 'var(--fg-muted)';
+          promptLine.style.fontStyle = 'italic';
+          document.querySelector('#verdict-log')?.appendChild(promptLine);
+        });
       }
     );
 
@@ -150,7 +179,7 @@ export function initApp(root: HTMLElement): void {
 
     generateBtn.addEventListener('click', () => {
       generateBtn.textContent = 'GENERATED (MOCK)';
-      console.log('Final Verdict:', latestVerdict);
     });
+    })();
   });
 }

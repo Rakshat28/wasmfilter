@@ -1,11 +1,13 @@
 export type Seconds = number & { readonly __brand: 'Seconds' };
 
-export type FrameFlag = 'BLUR' | 'NO_FACE' | 'MULTI_FACE' | 'LOW_CONFIDENCE' | 'HIGH_MOTION';
+export type FrameFlag = 'BLUR' | 'NO_FACE' | 'MULTI_FACE' | 'BAD_FRAMING' | 'FACE_CLIPPED' | 'HIGH_MOTION';
 
 export interface FrameScore {
   readonly t: Seconds;
   readonly faceCount: number;
   readonly faceConfidence: number;
+  readonly framingScore: number;
+  readonly isClipped: boolean;
   readonly sharpness: number;
   readonly motionDelta: number;
   readonly flags: ReadonlyArray<FrameFlag>;
@@ -24,13 +26,23 @@ export interface WorkerScoreRequest {
   readonly taskId: number;
   readonly timestamp: Seconds;
   readonly pixels: ArrayBuffer;
+  readonly width: number;
+  readonly height: number;
 }
+
+export interface WorkerResetRequest {
+  readonly type: 'RESET_KILL_SWITCH';
+}
+
+export type WorkerRequest = WorkerScoreRequest | WorkerResetRequest;
 
 export interface WorkerScoreResponse {
   readonly type: 'FRAME_SCORE';
   readonly taskId: number;
   readonly faceCount: number;
   readonly faceConfidence: number;
+  readonly framingScore: number;
+  readonly isClipped: boolean;
   readonly sharpness: number;
   readonly motionDelta: number;
 }

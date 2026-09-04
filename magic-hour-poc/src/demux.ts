@@ -179,7 +179,6 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
     const mp4boxfile = MP4Box.createFile();
     const reader = file.stream().getReader();
     let offset = 0;
-    let trackId = -1;
 
     mp4boxfile.onReady = (info: MP4Info): void => {
       if (info.videoTracks.length === 0) {
@@ -191,6 +190,7 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
       let description: Uint8Array | undefined;
       
 
+      /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call */
       const trak = (mp4boxfile as any).moov.traks.find((t: any) => t.tkhd.track_id === track.id);
       if (trak) {
         const entries = trak.mdia.minf.stbl.stsd.entries;
@@ -206,6 +206,7 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
           }
         }
       }
+      /* eslint-enable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call */
 
       const config: VideoDecoderConfig = {
         codec: track.codec,
