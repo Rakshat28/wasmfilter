@@ -1,9 +1,9 @@
 import { FrameFlag } from './types';
 
-const BLUR_SHARPNESS_MAX = 135.0;
+const BLUR_SHARPNESS_MAX = 60.0;
 const BAD_FRAMING_MIN = 0.5;
-const HIGH_MOTION_MIN = 24.0;
-export const BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.15;
+const HIGH_MOTION_MIN = 7.0;
+export const BAD_FRAME_RATIO_FAIL_THRESHOLD = 0.3;
 export const SAMPLE_FPS = 2;
 export const DEBOUNCE_MS = 300;
 export const MAX_IN_FLIGHT_FRAMES = 24;
@@ -27,7 +27,6 @@ export function computeFlags(
   } else if (faceCount > 1) {
     flags.push('MULTI_FACE');
   }
-
 
   if (faceCount > 0) {
     if (sharpness < BLUR_SHARPNESS_MAX) {

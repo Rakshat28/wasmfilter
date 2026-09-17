@@ -7,12 +7,13 @@ import {
   MAX_VIDEO_RESOLUTION_WIDTH,
 } from './thresholds';
 
-function createChunk(sample: MP4Sample): EncodedVideoChunk {
+function createChunk(sample: MP4Sample, firstTimeSec = 0): EncodedVideoChunk {
   const type: EncodedVideoChunkType = sample.is_sync ? 'key' : 'delta';
+  const timeSec = sample.cts / sample.timescale - firstTimeSec;
   return new EncodedVideoChunk({
     type,
-    timestamp: (sample.cts / sample.timescale) * 1000000,
-    duration: (sample.duration / sample.timescale) * 1000000,
+    timestamp: Math.max(0, Math.round(timeSec * 1000000)),
+    duration: Math.round((sample.duration / sample.timescale) * 1000000),
     data: sample.data,
   });
 }
@@ -114,8 +115,7 @@ export async function* demuxWindow(
       while (pendingSamples.length > 0) {
         const sample = pendingSamples.shift() as MP4Sample;
         let timeSec = sample.cts / sample.timescale;
-        
-        // Normalize timestamps so the first frame is always at t=0
+
         if (firstTimeSec === undefined) firstTimeSec = timeSec;
         timeSec -= firstTimeSec;
 
@@ -130,11 +130,11 @@ export async function* demuxWindow(
         } else if (timeSec >= startSeconds && timeSec <= endSeconds) {
           if (!yieldedKeyframe) {
             for (const bufferedSample of bufferSinceLastKeyframe) {
-              yield createChunk(bufferedSample);
+              yield createChunk(bufferedSample, firstTimeSec);
             }
             yieldedKeyframe = true;
           }
-          yield createChunk(sample);
+          yield createChunk(sample, firstTimeSec);
         } else if (timeSec > endSeconds) {
           done = true;
           break;
@@ -145,6 +145,23 @@ export async function* demuxWindow(
 
       const { done: readerDone, value } = await reader.read();
       if (readerDone) {
+        mp4boxfile.flush();
+        while (pendingSamples.length > 0) {
+          const sample = pendingSamples.shift() as MP4Sample;
+          let timeSec = sample.cts / sample.timescale;
+          if (firstTimeSec === undefined) firstTimeSec = timeSec;
+          timeSec -= firstTimeSec;
+
+          if (timeSec >= startSeconds && timeSec <= endSeconds) {
+            if (!yieldedKeyframe) {
+              for (const bufferedSample of bufferSinceLastKeyframe) {
+                yield createChunk(bufferedSample, firstTimeSec);
+              }
+              yieldedKeyframe = true;
+            }
+            yield createChunk(sample, firstTimeSec);
+          }
+        }
         break;
       }
 

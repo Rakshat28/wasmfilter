@@ -1,5 +1,6 @@
 export interface ScorerExports {
   scoreFrame(rgbaPtr: number, outPtr: number): void;
+  resetState?: () => void;
   memory: WebAssembly.Memory;
 }
 

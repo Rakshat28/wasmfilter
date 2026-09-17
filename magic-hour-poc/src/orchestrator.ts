@@ -1,6 +1,11 @@
-import { decodeWindow, downscaleFrame } from './decoder';
+import { decodeWindow, decodeWindowLegacy } from './decoder';
 import { log } from './log';
-import { BAD_FRAME_RATIO_FAIL_THRESHOLD, DEBOUNCE_MS, SAMPLE_FPS, computeFlags } from './thresholds';
+import {
+  BAD_FRAME_RATIO_FAIL_THRESHOLD,
+  DEBOUNCE_MS,
+  SAMPLE_FPS,
+  computeFlags,
+} from './thresholds';
 import { FrameFlag, FrameScore, IngestVerdict } from './types';
 import { WorkerPool } from './workerPool';
 import { MlWorkerPool } from './mlWorkerPool';
@@ -21,70 +26,30 @@ export class IngestOrchestrator {
     signal: AbortSignal,
     pool: WorkerPool | MlWorkerPool,
   ): Promise<IngestVerdict> {
-    if (typeof window.VideoDecoder === 'undefined') {
-      log.error('IngestOrchestrator', 'WebCodecs not supported on this device, failing open', null);
-      return {
-        pass: true,
-        frameScores: [],
-        badFrameRatio: 0,
-        dominantFlags: [],
-        errorMsg: 'WebCodecs not supported',
-      };
-    }
-
     const targetTimestamps: number[] = [];
     for (let t = startSeconds; t <= endSeconds + 0.0001; t += 1 / SAMPLE_FPS) {
       targetTimestamps.push(t);
     }
 
-    let nextTargetIndex = 0;
     const scorePromises: Promise<Omit<FrameScore, 'flags'>>[] = [];
-    const tolerance = 1 / (2 * SAMPLE_FPS);
 
     try {
-      const generator = decodeWindow(file, startSeconds, endSeconds, signal);
+      const generator =
+        typeof window.VideoDecoder === 'undefined'
+          ? decodeWindowLegacy(file, targetTimestamps, signal)
+          : decodeWindow(file, targetTimestamps, signal);
+
       for await (const frame of generator) {
         if (signal.aborted) {
-          frame.close();
           throw new Error('scoreWindow: Aborted via signal');
         }
 
-        if (nextTargetIndex >= targetTimestamps.length) {
-          frame.close();
-          continue;
+        try {
+          const transferBuffer = new Uint8ClampedArray(frame.pixels).buffer;
+          scorePromises.push(pool.score(frame.timestampSec, transferBuffer, 160, 90));
+        } catch (err) {
+          log.error('IngestOrchestrator', 'Failed to submit frame to worker', err);
         }
-
-        const frameTimeSec = frame.timestamp / 1000000;
-        let targetTimeSec = targetTimestamps[nextTargetIndex];
-
-        while (
-          nextTargetIndex < targetTimestamps.length &&
-          frameTimeSec > targetTimeSec + tolerance
-        ) {
-          nextTargetIndex++;
-          if (nextTargetIndex < targetTimestamps.length) {
-            targetTimeSec = targetTimestamps[nextTargetIndex];
-          }
-        }
-
-        if (nextTargetIndex >= targetTimestamps.length) {
-          frame.close();
-          continue;
-        }
-
-        if (Math.abs(frameTimeSec - targetTimeSec) <= tolerance) {
-          try {
-            const pixels = downscaleFrame(frame);
-            const transferBuffer = new Uint8ClampedArray(pixels).buffer;
-
-            scorePromises.push(pool.score(targetTimeSec, transferBuffer, 160, 90));
-            nextTargetIndex++;
-          } catch (err) {
-            log.error('IngestOrchestrator', 'Failed to downscale/submit frame', err);
-          }
-        }
-
-        frame.close();
       }
     } catch (err) {
       if ((err instanceof Error && err.message.includes('Aborted')) || signal.aborted) {

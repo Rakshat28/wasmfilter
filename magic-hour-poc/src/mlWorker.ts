@@ -50,10 +50,12 @@ async function getFaceDetector(): Promise<{ detector: FaceDetector; delegate: 'G
     }> => {
       try {
         const vision = await withTimeout(
-          FilesetResolver.forVisionTasks(self.location.origin + '/wasm', true),
-          5000,
+          FilesetResolver.forVisionTasks(self.location.origin + '/wasm'),
+          10000,
           'FilesetResolver hung',
         );
+        vision.wasmLoaderPath = self.location.origin + '/wasm/vision_wasm_module_internal.js';
+        vision.wasmBinaryPath = self.location.origin + '/wasm/vision_wasm_module_internal.wasm';
         try {
           const detector = await withTimeout(
             FaceDetector.createFromOptions(vision, {
@@ -113,6 +115,11 @@ workerGlobal.onmessage = async (
 
   if (request.type === 'RESET_KILL_SWITCH') {
     consecutiveSlowFrames = 0;
+    void getScorer().then((scorer) => {
+      if (typeof scorer.resetState === 'function') {
+        scorer.resetState();
+      }
+    });
     return;
   }
 
@@ -162,7 +169,13 @@ workerGlobal.onmessage = async (
       const bb = bestDetection.boundingBox;
       if (bb) {
         const areaFraction = (bb.width * bb.height) / (request.width * request.height);
-        framingScore = Math.max(0, 1.0 - Math.min(1.0, Math.abs(areaFraction - 0.165) / 0.165));
+        if (areaFraction >= 0.02 && areaFraction <= 0.25) {
+          framingScore = 1.0;
+        } else if (areaFraction < 0.02) {
+          framingScore = Math.max(0, areaFraction / 0.02);
+        } else {
+          framingScore = Math.max(0, 1.0 - (areaFraction - 0.25) / 0.25);
+        }
         if (
           bb.originX <= 1 ||
           bb.originY <= 1 ||
