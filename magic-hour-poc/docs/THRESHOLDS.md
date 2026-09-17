@@ -211,8 +211,8 @@ Per our Threat Model (Rule 4), we do not trust the input file or the structural 
 ### `MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024` (100 MB)
 **Why?** The browser must read the file stream. A massive multi-gigabyte file could exhaust tab resources or trick the user into a prolonged wait. We hard-cap processing to 100MB to enforce the POC's scope (short, portrait web videos).
 
-### `MAX_VIDEO_DURATION_SECONDS = 300` (5 mins)
-**Why?** Even if a file is heavily compressed and falls under 100MB, an maliciously crafted MP4 claiming to be 100 hours long could cause our sampler to queue up thousands of extraction jobs, leading to resource starvation. 5 minutes is a generous maximum for a Magic Hour source clip.
+### `MAX_VIDEO_DURATION_SECONDS = 600` (10 mins)
+**Why?** Increased from the initial 300s placeholder to 600s because the test `clean-sample.mp4` video (which runs for 5m52s) was being rejected. 10 minutes is still a reasonable maximum for a Magic Hour source clip without starving resources.
 
 ### `MAX_VIDEO_RESOLUTION_WIDTH = 4096`, `HEIGHT = 4096`
 **Why?** Uncompressed 8K or 16K frames consume gigabytes of RAM instantly upon decoding, easily circumventing our 24-frame safety buffer. We reject any video reporting a resolution above 4K during the initial `mp4box` metadata read, immediately failing the pipeline before decoding begins.

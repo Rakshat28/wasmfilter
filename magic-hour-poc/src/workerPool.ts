@@ -1,6 +1,12 @@
 import { log } from './log';
 import { MAX_IN_FLIGHT_FRAMES } from './thresholds';
-import { FrameScore, Seconds, WorkerScoreRequest, WorkerResponse, WorkerScoreResponse } from './types';
+import {
+  FrameScore,
+  Seconds,
+  WorkerScoreRequest,
+  WorkerResponse,
+  WorkerScoreResponse,
+} from './types';
 
 interface WorkerState {
   worker: Worker;
@@ -49,6 +55,15 @@ export class WorkerPool {
 
       worker.onerror = (err: ErrorEvent): void => {
         log.error('WorkerPool', 'Worker failed unconditionally', err.message);
+        for (const [taskId, state] of this.pendingResolvers.entries()) {
+          state.reject(new Error(`Worker crashed: ${err.message}`));
+          this.pendingResolvers.delete(taskId);
+          this.inFlightCount--;
+        }
+        for (const queued of this.queue) {
+          queued.reject(new Error(`Worker crashed: ${err.message}`));
+        }
+        this.queue = [];
       };
 
       this.workers.push({ worker, available: true });
@@ -59,7 +74,12 @@ export class WorkerPool {
     return this.totalHeapBytes / (1024 * 1024);
   }
 
-  public score(timestamp: number, pixels: ArrayBuffer, width: number, height: number): Promise<Omit<FrameScore, 'flags'>> {
+  public score(
+    timestamp: number,
+    pixels: ArrayBuffer,
+    width: number,
+    height: number,
+  ): Promise<Omit<FrameScore, 'flags'>> {
     if (this.inFlightCount + this.queue.length >= MAX_IN_FLIGHT_FRAMES) {
       return Promise.reject(
         new Error(`WorkerPool: MAX_IN_FLIGHT_FRAMES (${MAX_IN_FLIGHT_FRAMES}) exceeded`),
@@ -100,7 +120,7 @@ export class WorkerPool {
       timestamp,
       pixels,
       width,
-      height
+      height,
     };
 
     this.workers[workerIndex].worker.postMessage(request, [pixels]);

@@ -1,6 +1,7 @@
 export type Seconds = number & { readonly __brand: 'Seconds' };
 
-export type FrameFlag = 'BLUR' | 'NO_FACE' | 'MULTI_FACE' | 'BAD_FRAMING' | 'FACE_CLIPPED' | 'HIGH_MOTION';
+export type FrameFlag =
+  'BLUR' | 'NO_FACE' | 'MULTI_FACE' | 'BAD_FRAMING' | 'FACE_CLIPPED' | 'HIGH_MOTION';
 
 export interface FrameScore {
   readonly t: Seconds;
@@ -30,7 +31,7 @@ export interface WorkerScoreRequest {
   readonly height: number;
 }
 
-export interface WorkerResetRequest {
+interface WorkerResetRequest {
   readonly type: 'RESET_KILL_SWITCH';
 }
 
@@ -47,12 +48,18 @@ export interface WorkerScoreResponse {
   readonly motionDelta: number;
 }
 
-export interface WorkerInitResponse {
+interface WorkerInitResponse {
   readonly type: 'WORKER_INIT';
   readonly heapBytes: number;
 }
 
-export type WorkerResponse = WorkerScoreResponse | WorkerInitResponse;
+interface WorkerErrorResponse {
+  readonly type: 'WORKER_ERROR';
+  readonly taskId: number;
+  readonly error: string;
+}
+
+export type WorkerResponse = WorkerInitResponse | WorkerScoreResponse | WorkerErrorResponse;
 
 export function assertNever(x: never): never {
   throw new Error('Unexpected value: ' + String(x));

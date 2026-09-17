@@ -19,7 +19,6 @@ export async function* decodeWindow(
 
   const decoder = new VideoDecoder({
     output: (frame: VideoFrame): void => {
-
       const timeSec = frame.timestamp / 1000000;
       if (timeSec >= startSeconds && timeSec <= endSeconds) {
         frameQueue.push(frame);
@@ -42,12 +41,14 @@ export async function* decodeWindow(
 
   const demuxer = demuxWindow(file, startSeconds, endSeconds, signal);
 
-
   void (async (): Promise<void> => {
     try {
       for await (const chunk of demuxer) {
         if (signal.aborted) {
           throw new Error('decodeWindow: Aborted via signal during demux');
+        }
+        while (decoder.decodeQueueSize >= 24) {
+          await new Promise<void>((r) => setTimeout(r, 10));
         }
         decoder.decode(chunk);
       }
@@ -75,7 +76,6 @@ export async function* decodeWindow(
       } else if (isFlushed) {
         break;
       } else {
-
         await new Promise<void>((resolve) => {
           state.resolveNext = resolve;
         });
@@ -83,16 +83,19 @@ export async function* decodeWindow(
       }
     }
   } finally {
+    for (const remainingFrame of frameQueue) {
+      remainingFrame.close();
+    }
+    frameQueue.length = 0;
     if (decoder.state !== 'closed') {
       try {
         decoder.close();
       } catch {
-        // ignore close errors
+        /* empty */
       }
     }
   }
 }
-
 
 let offscreenCanvas: OffscreenCanvas | null = null;
 let offscreenCtx: OffscreenCanvasRenderingContext2D | null = null;

@@ -2,7 +2,7 @@ export function createTrimControls(
   container: HTMLElement,
   videoDuration: number,
   onChange: (start: number, end: number) => void,
-  onInput: (start: number, end: number) => void
+  onInput: (start: number, end: number) => void,
 ): void {
   container.innerHTML = `
     <div class="trim-inputs" style="flex-direction: column; width: 100%;">
@@ -37,7 +37,7 @@ export function createTrimControls(
   errorDiv.style.fontSize = '12px';
   errorDiv.style.marginTop = '8px';
   errorDiv.style.display = 'none';
-  // Insert before the confirm button
+
   const confirmBtnEl = container.querySelector('#confirm-trim-btn');
   if (confirmBtnEl && confirmBtnEl.parentNode) {
     confirmBtnEl.parentNode.insertBefore(errorDiv, confirmBtnEl);
@@ -54,7 +54,7 @@ export function createTrimControls(
     if (startVal < 0) isValid = false;
     if (endVal > videoDuration) isValid = false;
     if (endVal <= startVal) isValid = false;
-    
+
     if (isValid && endVal - startVal < 0.5) {
       isValid = false;
       errorMessage = 'Trim window must be at least 0.5 seconds.';
@@ -90,7 +90,6 @@ export function createTrimControls(
     }
   });
 
-  // Sync range to number
   startRange.addEventListener('input', () => {
     let sVal = parseFloat(startRange.value);
     const eVal = parseFloat(endRange.value);
@@ -112,7 +111,6 @@ export function createTrimControls(
     validateInputs();
   });
 
-  // Sync number to range
   startInput.addEventListener('input', () => {
     let sVal = parseFloat(startInput.value);
     const eVal = parseFloat(endInput.value);
@@ -134,7 +132,6 @@ export function createTrimControls(
     validateInputs();
   });
 
-  // Run initial validation to unlock button on load
   validateInputs();
   isInitialized = true;
 }

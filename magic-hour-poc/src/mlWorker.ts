@@ -21,6 +21,13 @@ class PerformanceTimeoutError extends Error {
   }
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, msg: string): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) => setTimeout(() => reject(new Error(msg)), ms)),
+  ]);
+}
+
 async function getScorer(): Promise<ScorerExports> {
   if (scorerPromise === null) {
     scorerPromise = loadScorer().then((scorer) => {
@@ -37,48 +44,71 @@ async function getScorer(): Promise<ScorerExports> {
 
 async function getFaceDetector(): Promise<{ detector: FaceDetector; delegate: 'GPU' | 'CPU' }> {
   if (faceDetectorPromise === null) {
-    faceDetectorPromise = (async (): Promise<{ detector: FaceDetector; delegate: 'GPU' | 'CPU' }> => {
-      const vision = await FilesetResolver.forVisionTasks('/wasm');
+    faceDetectorPromise = (async (): Promise<{
+      detector: FaceDetector;
+      delegate: 'GPU' | 'CPU';
+    }> => {
       try {
-        const detector = await FaceDetector.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: '/models/blaze_face_short_range.tflite',
-            delegate: 'GPU',
-          },
-          runningMode: 'IMAGE',
-          minDetectionConfidence: 0.5,
-        });
-        return { detector, delegate: 'GPU' };
-      } catch (err) {
-        log.warn('mlWorker', 'GPU delegate failed, falling back to CPU', err);
-        const detector = await FaceDetector.createFromOptions(vision, {
-          baseOptions: {
-            modelAssetPath: '/models/blaze_face_short_range.tflite',
-            delegate: 'CPU',
-          },
-          runningMode: 'IMAGE',
-          minDetectionConfidence: 0.5,
-        });
-        return { detector, delegate: 'CPU' };
+        const vision = await withTimeout(
+          FilesetResolver.forVisionTasks(self.location.origin + '/wasm', true),
+          5000,
+          'FilesetResolver hung',
+        );
+        try {
+          const detector = await withTimeout(
+            FaceDetector.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: '/models/blaze_face_short_range.tflite',
+                delegate: 'GPU',
+              },
+              runningMode: 'IMAGE',
+              minDetectionConfidence: 0.5,
+            }),
+            5000,
+            'GPU delegate init hung',
+          );
+          return { detector, delegate: 'GPU' as const };
+        } catch (err) {
+          log.warn('mlWorker', 'GPU delegate failed or hung, falling back to CPU', err);
+          const detector = await withTimeout(
+            FaceDetector.createFromOptions(vision, {
+              baseOptions: {
+                modelAssetPath: '/models/blaze_face_short_range.tflite',
+                delegate: 'CPU',
+              },
+              runningMode: 'IMAGE',
+              minDetectionConfidence: 0.5,
+            }),
+            5000,
+            'CPU delegate init hung',
+          );
+          return { detector, delegate: 'CPU' as const };
+        }
+      } catch (initErr) {
+        faceDetectorPromise = null;
+        throw initErr;
       }
     })();
   }
   return faceDetectorPromise;
 }
 
-void Promise.all([getScorer(), getFaceDetector()]).then(([scorer]) => {
-  workerGlobal.postMessage({
-    type: 'WORKER_INIT',
-    heapBytes: scorer.memory.buffer.byteLength
+void Promise.all([getScorer(), getFaceDetector()])
+  .then(([scorer]) => {
+    workerGlobal.postMessage({
+      type: 'WORKER_INIT',
+      heapBytes: scorer.memory.buffer.byteLength,
+    });
+  })
+  .catch((err) => {
+    log.error('mlWorker', 'Worker failed to init', err);
   });
-}).catch((err) => {
-  log.error('mlWorker', 'Worker failed to init', err);
-});
 
-// State for the kill switch, reset on new windows
 let consecutiveSlowFrames = 0;
 
-workerGlobal.onmessage = async (e: MessageEvent<import('./types').WorkerRequest>): Promise<void> => {
+workerGlobal.onmessage = async (
+  e: MessageEvent<import('./types').WorkerRequest>,
+): Promise<void> => {
   const request = e.data;
 
   if (request.type === 'RESET_KILL_SWITCH') {
@@ -99,7 +129,7 @@ workerGlobal.onmessage = async (e: MessageEvent<import('./types').WorkerRequest>
     const motionDelta = outView[3];
 
     const imageData = new ImageData(incomingPixels, request.width, request.height);
-    
+
     const startTime = performance.now();
     const detections: FaceDetectorResult = detector.detect(imageData);
     const elapsed = performance.now() - startTime;
@@ -107,7 +137,9 @@ workerGlobal.onmessage = async (e: MessageEvent<import('./types').WorkerRequest>
     if (elapsed > 500) {
       consecutiveSlowFrames++;
       if (consecutiveSlowFrames >= 3) {
-        throw new PerformanceTimeoutError(`FaceDetector took ${elapsed.toFixed(1)}ms on delegate ${delegate} for frame ${request.taskId}`);
+        throw new PerformanceTimeoutError(
+          `FaceDetector took ${elapsed.toFixed(1)}ms on delegate ${delegate} for frame ${request.taskId}`,
+        );
       }
     } else {
       consecutiveSlowFrames = 0;
@@ -134,8 +166,8 @@ workerGlobal.onmessage = async (e: MessageEvent<import('./types').WorkerRequest>
         if (
           bb.originX <= 1 ||
           bb.originY <= 1 ||
-          (bb.originX + bb.width) >= request.width - 1 ||
-          (bb.originY + bb.height) >= request.height - 1
+          bb.originX + bb.width >= request.width - 1 ||
+          bb.originY + bb.height >= request.height - 1
         ) {
           isClipped = true;
         }
@@ -155,11 +187,14 @@ workerGlobal.onmessage = async (e: MessageEvent<import('./types').WorkerRequest>
 
     workerGlobal.postMessage(response);
   } catch (err) {
-    if (err instanceof PerformanceTimeoutError) {
-      log.error('mlWorker', 'Kill switch tripped, failing open', err.message);
-      throw err;
-    }
     const errorMsg = err instanceof Error ? err.message : String(err);
-    throw new Error(`Worker failed on taskId ${request.taskId}: ${errorMsg}`, { cause: err });
+    if (err instanceof PerformanceTimeoutError) {
+      log.error('mlWorker', 'Kill switch tripped, failing open', errorMsg);
+    }
+    workerGlobal.postMessage({
+      type: 'WORKER_ERROR',
+      taskId: request.taskId,
+      error: errorMsg,
+    });
   }
 };

@@ -1,6 +1,12 @@
 import { log } from './log';
 import { MAX_IN_FLIGHT_FRAMES } from './thresholds';
-import { FrameScore, Seconds, WorkerScoreRequest, WorkerResponse, WorkerScoreResponse } from './types';
+import {
+  FrameScore,
+  Seconds,
+  WorkerScoreRequest,
+  WorkerResponse,
+  WorkerScoreResponse,
+} from './types';
 
 interface QueuedRequest {
   taskId: number;
@@ -27,7 +33,6 @@ export class MlWorkerPool {
   private totalHeapBytes = 0;
 
   constructor() {
-    // Exactly one worker for ML to avoid OOM
     this.worker = new Worker(new URL('./mlWorker.ts', import.meta.url), { type: 'module' });
 
     this.worker.onmessage = (e: MessageEvent<WorkerResponse>): void => {
@@ -36,11 +41,23 @@ export class MlWorkerPool {
         this.totalHeapBytes += data.heapBytes;
       } else if (data.type === 'FRAME_SCORE') {
         this.handleResponse(data);
+      } else if (data.type === 'WORKER_ERROR') {
+        this.handleError(data);
       }
     };
 
     this.worker.onerror = (err: ErrorEvent): void => {
       log.error('MlWorkerPool', 'Worker failed unconditionally', err.message);
+      if (this.pendingResolver !== null) {
+        this.pendingResolver.reject(new Error(`ML Worker crashed: ${err.message}`));
+        this.pendingResolver = null;
+        this.inFlightCount--;
+      }
+      for (const queued of this.queue) {
+        queued.reject(new Error(`ML Worker crashed: ${err.message}`));
+      }
+      this.queue = [];
+      this.workerAvailable = true;
     };
   }
 
@@ -48,7 +65,12 @@ export class MlWorkerPool {
     return this.totalHeapBytes / (1024 * 1024);
   }
 
-  public score(timestamp: number, pixels: ArrayBuffer, width: number, height: number): Promise<Omit<FrameScore, 'flags'>> {
+  public score(
+    timestamp: number,
+    pixels: ArrayBuffer,
+    width: number,
+    height: number,
+  ): Promise<Omit<FrameScore, 'flags'>> {
     if (this.inFlightCount + this.queue.length >= MAX_IN_FLIGHT_FRAMES) {
       return Promise.reject(
         new Error(`MlWorkerPool: MAX_IN_FLIGHT_FRAMES (${MAX_IN_FLIGHT_FRAMES}) exceeded`),
@@ -86,7 +108,7 @@ export class MlWorkerPool {
       timestamp,
       pixels,
       width,
-      height
+      height,
     };
 
     this.worker.postMessage(request, [pixels]);
@@ -109,6 +131,30 @@ export class MlWorkerPool {
       };
 
       state.resolve(score);
+    }
+
+    this.workerAvailable = true;
+
+    if (this.queue.length > 0) {
+      const nextTask = this.queue.shift() as QueuedRequest;
+      this.dispatch(
+        nextTask.taskId,
+        nextTask.timestamp,
+        nextTask.pixels,
+        nextTask.width,
+        nextTask.height,
+        nextTask.resolve,
+        nextTask.reject,
+      );
+    }
+  }
+
+  private handleError(response: { taskId: number; error: string }): void {
+    const state = this.pendingResolver;
+    if (state !== null && state.taskId === response.taskId) {
+      this.pendingResolver = null;
+      this.inFlightCount--;
+      state.reject(new Error(`Worker error: ${response.error}`));
     }
 
     this.workerAvailable = true;

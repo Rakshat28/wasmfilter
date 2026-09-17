@@ -26,14 +26,16 @@ async function getScorer(): Promise<ScorerExports> {
   return scorerPromise;
 }
 
-void getScorer().then((scorer) => {
-  workerGlobal.postMessage({
-    type: 'WORKER_INIT',
-    heapBytes: scorer.memory.buffer.byteLength
+void getScorer()
+  .then((scorer) => {
+    workerGlobal.postMessage({
+      type: 'WORKER_INIT',
+      heapBytes: scorer.memory.buffer.byteLength,
+    });
+  })
+  .catch((err) => {
+    log.error('Worker', 'Worker failed to init', err);
   });
-}).catch((err) => {
-  log.error('Worker', 'Worker failed to init', err);
-});
 
 workerGlobal.onmessage = async (e: MessageEvent<WorkerScoreRequest>): Promise<void> => {
   const request = e.data;
@@ -54,8 +56,8 @@ workerGlobal.onmessage = async (e: MessageEvent<WorkerScoreRequest>): Promise<vo
       taskId: request.taskId,
       faceCount: outView[0],
       faceConfidence: outView[1],
-      framingScore: 1.0, // Fast path doesn't compute true framing score
-      isClipped: false,  // Fast path doesn't compute clipping
+      framingScore: 1.0,
+      isClipped: false,
       sharpness: outView[2],
       motionDelta: outView[3],
     };

@@ -1,7 +1,6 @@
 import { decodeWindow, downscaleFrame } from './decoder';
 import { log } from './log';
-import { BAD_FRAME_RATIO_FAIL_THRESHOLD, DEBOUNCE_MS, SAMPLE_FPS } from './thresholds';
-import { computeFlags } from './thresholds';
+import { BAD_FRAME_RATIO_FAIL_THRESHOLD, DEBOUNCE_MS, SAMPLE_FPS, computeFlags } from './thresholds';
 import { FrameFlag, FrameScore, IngestVerdict } from './types';
 import { WorkerPool } from './workerPool';
 import { MlWorkerPool } from './mlWorkerPool';
@@ -20,7 +19,7 @@ export class IngestOrchestrator {
     startSeconds: number,
     endSeconds: number,
     signal: AbortSignal,
-    pool: WorkerPool | MlWorkerPool
+    pool: WorkerPool | MlWorkerPool,
   ): Promise<IngestVerdict> {
     if (typeof window.VideoDecoder === 'undefined') {
       log.error('IngestOrchestrator', 'WebCodecs not supported on this device, failing open', null);
@@ -29,16 +28,12 @@ export class IngestOrchestrator {
         frameScores: [],
         badFrameRatio: 0,
         dominantFlags: [],
-        errorMsg: 'WebCodecs not supported'
+        errorMsg: 'WebCodecs not supported',
       };
     }
 
     const targetTimestamps: number[] = [];
-    for (
-      let t = startSeconds;
-      t <= endSeconds + 0.0001;
-      t += 1 / SAMPLE_FPS
-    ) {
+    for (let t = startSeconds; t <= endSeconds + 0.0001; t += 1 / SAMPLE_FPS) {
       targetTimestamps.push(t);
     }
 
@@ -60,16 +55,28 @@ export class IngestOrchestrator {
         }
 
         const frameTimeSec = frame.timestamp / 1000000;
-        const targetTimeSec = targetTimestamps[nextTargetIndex];
+        let targetTimeSec = targetTimestamps[nextTargetIndex];
+
+        while (
+          nextTargetIndex < targetTimestamps.length &&
+          frameTimeSec > targetTimeSec + tolerance
+        ) {
+          nextTargetIndex++;
+          if (nextTargetIndex < targetTimestamps.length) {
+            targetTimeSec = targetTimestamps[nextTargetIndex];
+          }
+        }
+
+        if (nextTargetIndex >= targetTimestamps.length) {
+          frame.close();
+          continue;
+        }
 
         if (Math.abs(frameTimeSec - targetTimeSec) <= tolerance) {
           try {
             const pixels = downscaleFrame(frame);
             const transferBuffer = new Uint8ClampedArray(pixels).buffer;
 
-            // Worker pools might have different signatures depending on the type, but let's assume they both accept width/height
-            // We reverted WorkerPool to include width/height if we kept it? Wait! In workerPool.ts I kept width/height in the interface!
-            // Let's make sure both pools accept width and height. Yes, they do.
             scorePromises.push(pool.score(targetTimeSec, transferBuffer, 160, 90));
             nextTargetIndex++;
           } catch (err) {
@@ -80,7 +87,7 @@ export class IngestOrchestrator {
         frame.close();
       }
     } catch (err) {
-      if (err instanceof Error && err.message.includes('Aborted') || signal.aborted) {
+      if ((err instanceof Error && err.message.includes('Aborted')) || signal.aborted) {
         throw err;
       }
       log.error('IngestOrchestrator', 'Pipeline failed, failing open', err);
@@ -97,10 +104,32 @@ export class IngestOrchestrator {
       throw new Error('scoreWindow: Aborted via signal');
     }
 
-    const rawScores = await Promise.all(scorePromises);
+    let rawScores: Omit<FrameScore, 'flags'>[];
+    try {
+      rawScores = await Promise.all(scorePromises);
+    } catch (err) {
+      if (signal.aborted || (err instanceof Error && err.message.includes('Aborted'))) {
+        throw err;
+      }
+      log.error('IngestOrchestrator', 'Worker scoring failed, failing open', err);
+      return {
+        pass: true,
+        frameScores: [],
+        badFrameRatio: 0,
+        dominantFlags: [],
+        errorMsg: err instanceof Error ? err.message : String(err),
+      };
+    }
 
     const frameScores: FrameScore[] = rawScores.map((raw) => {
-      const flags = computeFlags(raw.faceCount, raw.faceConfidence, raw.framingScore, raw.isClipped, raw.sharpness, raw.motionDelta);
+      const flags = computeFlags(
+        raw.faceCount,
+        raw.faceConfidence,
+        raw.framingScore,
+        raw.isClipped,
+        raw.sharpness,
+        raw.motionDelta,
+      );
       return {
         ...raw,
         flags,

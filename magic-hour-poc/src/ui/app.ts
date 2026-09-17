@@ -5,6 +5,7 @@ import { createTrimControls } from './trimControls';
 import { createMetricsStrip } from './metricsStrip';
 import { createVerdictPanel } from './verdictPanel';
 import { SAMPLE_FPS } from '../thresholds';
+import { log } from '../log';
 
 export function initApp(root: HTMLElement): void {
   const pool = new WorkerPool();
@@ -55,131 +56,141 @@ export function initApp(root: HTMLElement): void {
       }
       fileUrl = URL.createObjectURL(file);
 
-      // Read duration
       const tempVideo = document.createElement('video');
       tempVideo.src = fileUrl;
-      
+
       await new Promise<void>((resolve, reject) => {
         tempVideo.onloadedmetadata = (): void => resolve();
         tempVideo.onerror = (): void => reject(new Error('Failed to load video metadata'));
       });
 
-    const duration = tempVideo.duration;
+      const duration = tempVideo.duration;
 
-    // Reset button state for new video
-    generateBtn.disabled = true;
-    generateBtn.textContent = 'GENERATE FACE SWAP';
+      generateBtn.disabled = true;
+      generateBtn.textContent = 'GENERATE FACE SWAP';
 
-    // Show main content
-    mainContent.style.display = 'grid';
+      mainContent.style.display = 'grid';
 
-    // Render components
-    videoContainer.innerHTML = '';
-    const video = document.createElement('video');
-    video.src = fileUrl;
-    video.muted = true;
-    video.controls = true;
-    video.className = 'trim-video';
-    videoContainer.appendChild(video);
+      videoContainer.innerHTML = '';
+      const video = document.createElement('video');
+      video.src = fileUrl;
+      video.muted = true;
+      video.controls = true;
+      video.className = 'trim-video';
+      videoContainer.appendChild(video);
 
-    const metricsStrip = createMetricsStrip(metricsContainer);
-    const verdictPanel = createVerdictPanel(verdictContainer);
+      const metricsStrip = createMetricsStrip(metricsContainer);
+      const verdictPanel = createVerdictPanel(verdictContainer);
 
-    createTrimControls(
-      controlsContainer,
-      duration,
-      (start, end) => {
-        orchestrator.abortCurrent();
-        verdictPanel.clear();
-        verdictPanel.hideProceedButton();
-        generateBtn.disabled = true;
-
-        const promptLine = document.createElement('div');
-        promptLine.textContent = '> RUNNING FULL ML CHECK (MediaPipe)...';
-        promptLine.style.color = 'var(--fg-muted)';
-        promptLine.style.fontStyle = 'italic';
-        document.querySelector('#verdict-log')?.appendChild(promptLine);
-
-        if (fullCheckController) {
-          fullCheckController.abort();
-        }
-        fullCheckController = new AbortController();
-
-        void orchestrator.scoreWindowFull(file, start, end, fullCheckController.signal).then((verdict) => {
-          verdictPanel.clear();
-
-          verdict.frameScores.forEach((score) => {
-            verdictPanel.appendLine(score);
-          });
-
-          if (verdict.pass && verdict.frameScores.length === 0) {
-            const errLine = document.createElement('div');
-            errLine.textContent = `> [WARN] Pipeline encountered a fatal decoding error. Failing open (security safety hatch activated). Error: ${verdict.errorMsg}`;
-            errLine.style.color = 'var(--danger)';
-            errLine.style.fontWeight = 'bold';
-            document.querySelector('#verdict-log')?.appendChild(errLine);
-          }
-
-          metricsStrip.update(
-            SAMPLE_FPS,
-            fullPool.getApproxHeapMB() + pool.getApproxHeapMB(),
-            verdict.frameScores.map((s) => s.faceConfidence)
-          );
-
-          if (!verdict.pass) {
-            generateBtn.disabled = true;
-            verdictPanel.showProceedButton(() => {
-              verdictPanel.hideProceedButton();
-              generateBtn.disabled = false;
-            });
-          } else {
-            generateBtn.disabled = false;
-          }
-        }).catch((err) => {
-          if (err instanceof Error && err.message.includes('Aborted')) return;
-          // Use console error only sparingly or replace with log.error. But we can't import log here easily if we haven't. Let's just catch it.
-        });
-      },
-      (start, end) => {
-        if (fullCheckController) {
-          fullCheckController.abort();
-        }
-        generateBtn.disabled = true;
-        
-        orchestrator.scoreWindowFastDebounced(file, start, end, (verdict) => {
+      createTrimControls(
+        controlsContainer,
+        duration,
+        (start, end) => {
+          orchestrator.abortCurrent();
           verdictPanel.clear();
           verdictPanel.hideProceedButton();
+          generateBtn.disabled = true;
 
-          verdict.frameScores.forEach((score) => {
-            verdictPanel.appendLine(score);
-          });
-          
-          metricsStrip.update(
-            SAMPLE_FPS,
-            pool.getApproxHeapMB() + fullPool.getApproxHeapMB(),
-            []
-          );
-          
           const promptLine = document.createElement('div');
-          promptLine.textContent = '> FAST CHECK COMPLETE. Press CONFIRM TRIM to run full ML validation...';
+          promptLine.textContent = '> RUNNING FULL ML CHECK (MediaPipe)...';
           promptLine.style.color = 'var(--fg-muted)';
           promptLine.style.fontStyle = 'italic';
           document.querySelector('#verdict-log')?.appendChild(promptLine);
-        });
-      }
-    );
 
-    // Instructional text before the user types
-    verdictPanel.clear();
-    const promptLine = document.createElement('div');
-    promptLine.textContent = '> WAITING FOR CONFIRMATION: Press CONFIRM TRIM to begin analysis...';
-    promptLine.style.color = 'var(--fg-muted)';
-    promptLine.style.fontStyle = 'italic';
-    document.querySelector('#verdict-log')?.appendChild(promptLine);
+          if (fullCheckController) {
+            fullCheckController.abort();
+          }
+          fullCheckController = new AbortController();
 
-    generateBtn.addEventListener('click', () => {
-      generateBtn.textContent = 'GENERATED (MOCK)';
-    });
+          void orchestrator
+            .scoreWindowFull(file, start, end, fullCheckController.signal)
+            .then((verdict) => {
+              verdictPanel.clear();
+
+              verdict.frameScores.forEach((score) => {
+                verdictPanel.appendLine(score);
+              });
+
+              if (verdict.pass && verdict.frameScores.length === 0) {
+                const errLine = document.createElement('div');
+                errLine.textContent = `> [WARN] Pipeline encountered a fatal decoding error. Failing open (security safety hatch activated). Error: ${verdict.errorMsg}`;
+                errLine.style.color = 'var(--danger)';
+                errLine.style.fontWeight = 'bold';
+                document.querySelector('#verdict-log')?.appendChild(errLine);
+              }
+
+              metricsStrip.update(
+                SAMPLE_FPS,
+                fullPool.getApproxHeapMB() + pool.getApproxHeapMB(),
+                verdict.frameScores.map((s) => s.faceConfidence),
+              );
+
+              if (!verdict.pass) {
+                generateBtn.disabled = true;
+                verdictPanel.showProceedButton(() => {
+                  verdictPanel.hideProceedButton();
+                  generateBtn.disabled = false;
+                });
+              } else {
+                generateBtn.disabled = false;
+              }
+            })
+            .catch((err) => {
+              if (err instanceof Error && err.message.includes('Aborted')) return;
+              log.error('App', 'Full ML check failed', err);
+              verdictPanel.clear();
+              const errLine = document.createElement('div');
+              errLine.textContent = `> [ERROR] ML pipeline failed: ${err instanceof Error ? err.message : String(err)}`;
+              errLine.style.color = 'var(--danger)';
+              errLine.style.fontWeight = 'bold';
+              document.querySelector('#verdict-log')?.appendChild(errLine);
+              verdictPanel.showProceedButton(() => {
+                verdictPanel.hideProceedButton();
+                generateBtn.disabled = false;
+              });
+            });
+        },
+        (start, end) => {
+          if (fullCheckController) {
+            fullCheckController.abort();
+          }
+          generateBtn.disabled = true;
+
+          orchestrator.scoreWindowFastDebounced(file, start, end, (verdict) => {
+            verdictPanel.clear();
+            verdictPanel.hideProceedButton();
+
+            verdict.frameScores.forEach((score) => {
+              verdictPanel.appendLine(score);
+            });
+
+            metricsStrip.update(
+              SAMPLE_FPS,
+              pool.getApproxHeapMB() + fullPool.getApproxHeapMB(),
+              [],
+            );
+
+            const promptLine = document.createElement('div');
+            promptLine.textContent =
+              '> FAST CHECK COMPLETE. Press CONFIRM TRIM to run full ML validation...';
+            promptLine.style.color = 'var(--fg-muted)';
+            promptLine.style.fontStyle = 'italic';
+            document.querySelector('#verdict-log')?.appendChild(promptLine);
+          });
+        },
+      );
+
+      verdictPanel.clear();
+      const promptLine = document.createElement('div');
+      promptLine.textContent =
+        '> WAITING FOR CONFIRMATION: Press CONFIRM TRIM to begin analysis...';
+      promptLine.style.color = 'var(--fg-muted)';
+      promptLine.style.fontStyle = 'italic';
+      document.querySelector('#verdict-log')?.appendChild(promptLine);
+
+      generateBtn.onclick = (): void => {
+        generateBtn.textContent = 'GENERATED (MOCK)';
+      };
     })();
   });
 }

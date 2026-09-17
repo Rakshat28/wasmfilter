@@ -51,6 +51,7 @@ export async function* demuxWindow(
 
   let yieldedKeyframe = false;
   let done = false;
+  let firstTimeSec: number | undefined;
 
   const pendingSamples: MP4Sample[] = [];
   let bufferSinceLastKeyframe: MP4Sample[] = [];
@@ -86,7 +87,7 @@ export async function* demuxWindow(
       }
     }
 
-    mp4boxfile.setExtractionOptions(videoTrackId, null, { nbSamples: track.nb_samples });
+    mp4boxfile.setExtractionOptions(videoTrackId, null, { nbSamples: 200 });
     mp4boxfile.start();
   };
 
@@ -112,7 +113,11 @@ export async function* demuxWindow(
 
       while (pendingSamples.length > 0) {
         const sample = pendingSamples.shift() as MP4Sample;
-        const timeSec = sample.cts / sample.timescale;
+        let timeSec = sample.cts / sample.timescale;
+        
+        // Normalize timestamps so the first frame is always at t=0
+        if (firstTimeSec === undefined) firstTimeSec = timeSec;
+        timeSec -= firstTimeSec;
 
         if (timeSec < startSeconds) {
           if (sample.is_sync || sample.is_rap) {
@@ -154,11 +159,8 @@ export async function* demuxWindow(
       }
       buffer.fileStart = offset;
 
-      offset = mp4boxfile.appendBuffer(buffer);
-
-      if (offset < 0) {
-        throw new Error('mp4box appendBuffer error');
-      }
+      mp4boxfile.appendBuffer(buffer);
+      offset += buffer.byteLength;
     }
   } catch (err) {
     if (err instanceof Error && err.message.includes('Aborted')) {
@@ -188,7 +190,6 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
       const track = info.videoTracks[0];
 
       let description: Uint8Array | undefined;
-      
 
       /* eslint-disable @typescript-eslint/no-unsafe-assignment, @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-call */
       const trak = (mp4boxfile as any).moov.traks.find((t: any) => t.tkhd.track_id === track.id);
@@ -243,7 +244,8 @@ export async function getVideoConfig(file: File): Promise<VideoDecoderConfig> {
             ) as MP4ArrayBuffer;
           }
           buffer.fileStart = offset;
-          offset = mp4boxfile.appendBuffer(buffer);
+          mp4boxfile.appendBuffer(buffer);
+          offset += buffer.byteLength;
         }
       } catch (err) {
         reject(err instanceof Error ? err : new Error(String(err)));
