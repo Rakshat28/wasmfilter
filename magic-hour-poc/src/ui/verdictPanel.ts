@@ -21,19 +21,7 @@ export function createVerdictPanel(container: HTMLElement): {
     appendLine: (score: FrameScore): void => {
       const line = document.createElement('div');
 
-      const tStr = score.t.toFixed(1);
-      const confStr = score.faceConfidence.toFixed(2);
-      const framingStr = score.framingScore.toFixed(2);
-      const sharpStr = score.flags.includes('BLUR') ? 'BAD' : 'OK';
-      const rejectStr = score.flags.length > 0 ? ' REJECT: ' + score.flags.join(',') : '';
-
-      line.textContent = `[t=${tStr}s] face=${score.faceCount} conf=${confStr} frame=${framingStr} sharp=${sharpStr}${rejectStr}`;
-
-      if (score.flags.length === 0) {
-        line.style.color = 'var(--success)';
-      } else {
-        line.style.color = 'var(--danger)';
-      }
+      line.textContent = `[t=${score.t}s] faceCount=${score.faceCount} confidence=${score.faceConfidence.toFixed(2)} sharpness=${score.sharpness.toFixed(1)} motion=${score.motionDelta.toFixed(1)}`;
 
       logContainer.appendChild(line);
       logContainer.scrollTop = logContainer.scrollHeight;
