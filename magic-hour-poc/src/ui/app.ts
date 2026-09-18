@@ -170,35 +170,15 @@ export function initApp(root: HTMLElement): void {
             fullCheckController.abort();
           }
           generateBtn.disabled = true;
+          verdictPanel.hideProceedButton();
+          verdictPanel.showAnalyzingState();
 
-          orchestrator.scoreWindowFastDebounced(file, start, end, (verdict) => {
-            verdictPanel.clear();
-            verdictPanel.hideProceedButton();
-
-            verdict.frameScores.forEach((score) => {
-              verdictPanel.appendLine(score);
-            });
-
-            if (verdict.frameScores.length === 0) {
-              const errLine = document.createElement('div');
-              errLine.textContent = `> [WARN] Fast check returned 0 scores. ${verdict.errorMsg ? 'Error: ' + verdict.errorMsg : 'No frames in window / fail-open activated.'}`;
-              errLine.style.color = 'var(--danger)';
-              errLine.style.fontWeight = 'bold';
-              document.querySelector('#verdict-log')?.appendChild(errLine);
-            }
-
+          orchestrator.scoreWindowFastDebounced(file, start, end, () => {
             metricsStrip.update(
               SAMPLE_FPS,
               pool.getApproxHeapMB() + fullPool.getApproxHeapMB(),
               [],
             );
-
-            const promptLine = document.createElement('div');
-            promptLine.textContent =
-              '> FAST CHECK COMPLETE. Press CONFIRM TRIM to run full ML validation...';
-            promptLine.style.color = 'var(--fg-muted)';
-            promptLine.style.fontStyle = 'italic';
-            document.querySelector('#verdict-log')?.appendChild(promptLine);
           });
         },
       );

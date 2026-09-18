@@ -5,6 +5,7 @@ export function createVerdictPanel(container: HTMLElement): {
   clear: () => void;
   showProceedButton: (onProceed: () => void) => void;
   hideProceedButton: () => void;
+  showAnalyzingState: () => void;
 } {
   container.innerHTML = `
     <div class="verdict-log" id="verdict-log"></div>
@@ -39,6 +40,15 @@ export function createVerdictPanel(container: HTMLElement): {
     hideProceedButton: (): void => {
       btnContainer.style.display = 'none';
       proceedBtn.onclick = null;
+    },
+
+    showAnalyzingState: (): void => {
+      logContainer.innerHTML = '';
+      const line = document.createElement('div');
+      line.textContent = '> ANALYZING... (live feedback disabled during initial scan)';
+      line.style.color = 'var(--fg-muted)';
+      line.style.fontStyle = 'italic';
+      logContainer.appendChild(line);
     },
   };
 }

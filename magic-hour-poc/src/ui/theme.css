@@ -327,3 +327,109 @@ body {
   transform: none;
   box-shadow: none;
 }
+
+@media (max-width: 640px) {
+  body {
+    padding: 8px;
+    overflow-y: auto;
+  }
+
+  #app {
+    padding: 8px;
+    height: auto;
+    min-height: 100vh;
+    grid-template-rows: auto auto auto;
+    gap: 12px;
+  }
+
+  .main-content {
+    grid-template-columns: 1fr;
+    gap: 12px;
+    height: auto;
+  }
+
+  .video-container {
+    min-height: 200px;
+    max-height: 300px;
+  }
+
+  .trim-controls-wrapper {
+    flex-direction: column;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .trim-inputs {
+    flex-direction: column;
+    width: 100%;
+    gap: 8px;
+  }
+
+  .trim-input-group {
+    width: 100%;
+  }
+
+  .trim-input-group input {
+    width: 100%;
+    min-height: 36px;
+  }
+
+  .verdict-panel-wrapper {
+    max-height: 300px;
+    padding: 12px;
+  }
+
+  .verdict-log {
+    max-height: 240px;
+    font-size: 12px;
+    line-height: 1.4;
+    overflow-x: auto;
+  }
+
+  .metrics-strip {
+    flex-wrap: wrap;
+    gap: 8px;
+    font-size: 11px;
+    padding: 12px;
+  }
+
+  button,
+  .btn {
+    padding: 8px 12px;
+    font-size: 13px;
+    min-height: 40px;
+    width: 100%;
+  }
+}
+
+@media (max-width: 1024px) and (min-width: 641px) {
+  body {
+    padding: 12px;
+    overflow-y: auto;
+  }
+
+  #app {
+    padding: 12px;
+    height: auto;
+    min-height: 100vh;
+    gap: 16px;
+  }
+
+  .main-content {
+    grid-template-columns: 1fr;
+    gap: 16px;
+    height: auto;
+  }
+
+  .metrics-strip {
+    font-size: 12px;
+  }
+
+  .verdict-panel-wrapper {
+    max-height: 400px;
+  }
+
+  .verdict-log {
+    font-size: 13px;
+  }
+}
